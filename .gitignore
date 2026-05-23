@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -9,9 +8,3 @@
 *.njsproj
 *.sln
 *.sw?
-=======
-node_modules/
-dist/
-.vite/
-.env
->>>>>>> origin/main

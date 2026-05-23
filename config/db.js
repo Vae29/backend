@@ -1,15 +1,15 @@
 import dotenv from 'dotenv';
 import pkg from 'pg';
 
-dotenv.config();
+dotenv.config({ override: true });
 
 const { Pool } = pkg;
 
 const pool = new Pool({
   user: process.env.PG_USER || 'postgres',
   host: process.env.PG_HOST || 'localhost',
-  database: process.env.PG_DATABASE || 'costosbd',
-  password: process.env.PG_PASSWORD || 'TU_PASSWORD',
+  database: process.env.PG_DATABASE || 'costos',
+  password: process.env.PG_PASSWORD || 'root',
   port: process.env.PG_PORT ? Number(process.env.PG_PORT) : 5432,
 });
 
