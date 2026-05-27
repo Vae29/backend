@@ -5,6 +5,7 @@ import pool, { testConnection } from './config/db.js';
 import authRoutes from './routes/auth.js';
 import asignacionesUsuarioRoutes from './routes/asignaciones-usuario.js';
 import dashboardRoutes from './routes/dashboard.js';
+import reportesRoutes from './routes/reportes.js';
 
 // Verify routes loaded
 console.log('AS routes object keys:', Object.keys(asignacionesUsuarioRoutes));
@@ -28,12 +29,15 @@ testConnection();
 app.use('/auth', authRoutes);
 app.use('/api', asignacionesUsuarioRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/reportes', reportesRoutes);
 
 // Debug: Log all registered routes
 app.use((req, res, next) => {
   console.log(`Route not matched: ${req.method} ${req.path}`);
   next();
 });
+
+console.log('Mounted route: /api/reportes (reportes)')
 
 // test route under /api/dashboard
 app.get('/api/dashboard/test', (req, res) => res.json({ success: true, msg: 'dashboard base OK' }))
