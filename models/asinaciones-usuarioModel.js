@@ -28,6 +28,31 @@ export async function fetchCultivosEnProceso() {
   }
 }
 
+export async function fetchCultivosPorFinca(fincaId) {
+  try {
+    const result = await pool.query(
+      `SELECT 
+        c.idcultivo AS id, 
+        c.nombre, 
+        tc.nombre AS tipo,
+        c.fecha_inicio AS fechaInicio,
+        c.fecha_final AS fechaCosecha,
+        e.nombre AS estado,
+        c.idestado
+       FROM cultivo c
+       LEFT JOIN tipos_cultivo tc ON c.idtipocultivo = tc.idtipocultivo
+       LEFT JOIN estado e ON c.idestado = e.idestado
+       WHERE c.idfinca = $1
+       ORDER BY c.nombre`,
+      [fincaId]
+    );
+    return result.rows;
+  } catch (error) {
+    console.error('Error fetching cultivos por finca:', error);
+    throw error;
+  }
+}
+
 export async function assignFincasToUser(userId, fincaIds) {
   try {
     // Eliminar asignaciones previas
