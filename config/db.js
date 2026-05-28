@@ -13,6 +13,14 @@ const pool = new Pool({
   port: process.env.PG_PORT ? Number(process.env.PG_PORT) : 5432,
 });
 
+pool.on('connect', () => {
+  console.log('🔌 PostgreSQL pool connected');
+});
+
+pool.on('error', (error) => {
+  console.error('❌ PostgreSQL pool error', error);
+});
+
 const testConnection = async () => {
   try {
     const client = await pool.connect();

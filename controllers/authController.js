@@ -1,3 +1,4 @@
+import jwt from 'jsonwebtoken';
 import { sendResetCodeEmail } from '../utils/emailSender.js';
 import {
   findUserByCredentials,
@@ -10,8 +11,35 @@ import {
   findValidPasswordResetToken,
   markPasswordResetTokenUsed,
 } from '../models/authModel.js';
+import { crearSesion, verificarSesion, cerrarSesion, obtenerSesionesActivas } from '../models/sesionesModel.js';
+import { JWT_CONFIG } from '../config/jwt.js';
 
 const generate4DigitCode = () => String(Math.floor(1000 + Math.random() * 9000));
+
+// Generar Access Token (15 minutos)
+function generarAccessToken(usuario) {
+  return jwt.sign(
+    {
+      id: usuario.id,
+      email: usuario.email,
+      role: Number(usuario.rol) === 1 ? 'admin' : 'worker',
+    },
+    JWT_CONFIG.ACCESS_TOKEN_SECRET,
+    { expiresIn: JWT_CONFIG.ACCESS_TOKEN_EXPIRES }
+  );
+}
+
+// Generar Refresh Token (7 días)
+function generarRefreshToken(usuario) {
+  return jwt.sign(
+    {
+      id: usuario.id,
+      email: usuario.email,
+    },
+    JWT_CONFIG.REFRESH_TOKEN_SECRET,
+    { expiresIn: JWT_CONFIG.REFRESH_TOKEN_EXPIRES }
+  );
+}
 
 // Login del usuario
 export async function login(req, res) {
@@ -36,6 +64,26 @@ export async function login(req, res) {
 
     const role = Number(usuario.rol) === 1 ? 'admin' : 'worker';
 
+    // Generar tokens
+    const accessToken = generarAccessToken(usuario);
+    const refreshToken = generarRefreshToken(usuario);
+
+    // Obtener información del dispositivo (User-Agent)
+    const userAgent = req.get('user-agent') || 'Desconocido';
+    const ipAddress = req.ip || req.connection.remoteAddress || 'Desconocida';
+
+    // Guardar sesión en la BD
+    const sesion = await crearSesion(usuario.id, refreshToken, userAgent, ipAddress);
+
+    // Enviar refresh token en HttpOnly Cookie
+    res.cookie('refreshToken', refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production', // Solo HTTPS en producción
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 días
+      path: '/',
+    });
+
     res.json({
       success: true,
       message: 'Login exitoso',
@@ -43,7 +91,9 @@ export async function login(req, res) {
         id: usuario.id,
         email: usuario.email,
         nombre: usuario.nombre,
+        apellidos: usuario.apellidos || '',
         role,
+        accessToken, // Retornar access token en el body
       },
     });
   } catch (error) {
@@ -347,6 +397,132 @@ export async function getAllUsers(req, res) {
     res.status(500).json({
       success: false,
       message: 'Error al obtener los usuarios',
+    });
+  }
+}
+
+// Refresh Token - Generar nuevo Access Token
+export async function refreshToken(req, res) {
+  try {
+    const token = req.cookies.refreshToken;
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'Refresh token no encontrado',
+      });
+    }
+
+    // Verificar que el refresh token sea válido
+    let decoded;
+    try {
+      decoded = jwt.verify(token, JWT_CONFIG.REFRESH_TOKEN_SECRET);
+    } catch (error) {
+      return res.status(401).json({
+        success: false,
+        message: 'Refresh token inválido o expirado',
+      });
+    }
+
+    // Verificar que la sesión existe en la BD
+    const sesion = await verificarSesion(decoded.id, token);
+
+    if (!sesion) {
+      return res.status(401).json({
+        success: false,
+        message: 'Sesión no válida',
+      });
+    }
+
+    // Obtener datos del usuario
+    const usuario = await findUserByEmail(decoded.email);
+
+    if (!usuario) {
+      return res.status(404).json({
+        success: false,
+        message: 'Usuario no encontrado',
+      });
+    }
+
+    // Generar nuevo Access Token
+    const newAccessToken = generarAccessToken(usuario);
+
+    res.json({
+      success: true,
+      message: 'Access token renovado',
+      data: {
+        accessToken: newAccessToken,
+        id: usuario.id,
+        email: usuario.email,
+        nombre: usuario.nombre,
+        apellidos: usuario.apellidos || '',
+        role: Number(usuario.rol) === 1 ? 'admin' : 'worker',
+      },
+    });
+  } catch (error) {
+    console.error('Error en refreshToken:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al renovar el token',
+    });
+  }
+}
+
+// Logout - Cerrar sesión
+export async function logout(req, res) {
+  try {
+    const token = req.cookies.refreshToken;
+
+    if (token) {
+      try {
+        const decoded = jwt.verify(token, JWT_CONFIG.REFRESH_TOKEN_SECRET);
+        const sesion = await verificarSesion(decoded.id, token);
+
+        if (sesion) {
+          await cerrarSesion(sesion.id_sesion);
+        }
+      } catch (error) {
+        console.error('Error al cerrar sesión en BD:', error);
+      }
+    }
+
+    // Limpiar la cookie
+    res.clearCookie('refreshToken', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      path: '/',
+    });
+
+    res.json({
+      success: true,
+      message: 'Sesión cerrada correctamente',
+    });
+  } catch (error) {
+    console.error('Error en logout:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al cerrar sesión',
+    });
+  }
+}
+
+// Obtener sesiones activas del usuario (para panel de dispositivos)
+export async function obtenerMisSesiones(req, res) {
+  try {
+    const userId = req.user.id; // Del middleware de verificación
+
+    const sesiones = await obtenerSesionesActivas(userId);
+
+    res.json({
+      success: true,
+      data: sesiones,
+    });
+  } catch (error) {
+    console.error('Error en obtenerMisSesiones:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al obtener las sesiones',
     });
   }
 }

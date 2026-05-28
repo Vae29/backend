@@ -1,9 +1,13 @@
 import express from 'express';
-import { login, getAllUsers, createUserController, updateUserController, deleteUserController, requestPasswordReset, verifyResetCode, recoverPassword } from '../controllers/authController.js';
+import { login, getAllUsers, createUserController, updateUserController, deleteUserController, requestPasswordReset, verifyResetCode, recoverPassword, refreshToken, logout, obtenerMisSesiones } from '../controllers/authController.js';
+import { verificarAccessToken } from '../middleware/auth.js';
 
 const router = express.Router();
 
 router.post('/login', login);
+router.post('/refresh', refreshToken);
+router.post('/logout', logout);
+router.get('/sesiones', verificarAccessToken, obtenerMisSesiones);
 router.post('/request-reset', requestPasswordReset);
 router.post('/verify-reset-code', verifyResetCode);
 router.post('/recover-password', recoverPassword);

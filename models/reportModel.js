@@ -4,7 +4,6 @@ import pool from '../config/db.js';
 // Todas las funciones reciben filtros y devuelven filas desde PostgreSQL.
 
 export async function getFilters(fincaId) {
-  const client = await pool.connect();
   try {
     const filterFinca = Number.isInteger(Number(fincaId)) && Number(fincaId) > 0 ? Number(fincaId) : null;
 
@@ -31,10 +30,10 @@ export async function getFilters(fincaId) {
     `;
 
     const [cultivosRes, usuariosRes, estadosRes, categoriasRes] = await Promise.all([
-      client.query(cultivosQuery, [filterFinca]),
-      client.query(usuariosQuery),
-      client.query(estadosQuery),
-      client.query(categoriasQuery),
+      pool.query(cultivosQuery, [filterFinca]),
+      pool.query(usuariosQuery),
+      pool.query(estadosQuery),
+      pool.query(categoriasQuery),
     ]);
 
     return {
@@ -43,8 +42,9 @@ export async function getFilters(fincaId) {
       estados: estadosRes.rows,
       categorias: categoriasRes.rows,
     };
-  } finally {
-    client.release();
+  } catch (error) {
+    console.error('Error in getFilters:', error);
+    throw error;
   }
 }
 
