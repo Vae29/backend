@@ -78,8 +78,8 @@ export async function login(req, res) {
     // Enviar refresh token en HttpOnly Cookie
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production', // Solo HTTPS en producción
-      sameSite: 'strict',
+      secure: process.env.NODE_ENV === 'production', // False en desarrollo (localhost), true en producción
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 días
       path: '/',
     });
@@ -460,7 +460,7 @@ export async function refreshToken(req, res) {
       },
     });
   } catch (error) {
-    console.error('Error en refreshToken:', error);
+    console.error('[refreshToken] ❌ ERROR:', error);
     res.status(500).json({
       success: false,
       message: 'Error al renovar el token',
@@ -490,7 +490,7 @@ export async function logout(req, res) {
     res.clearCookie('refreshToken', {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
       path: '/',
     });
 

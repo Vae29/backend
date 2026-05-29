@@ -10,7 +10,7 @@ export async function findUserByCredentials(email, password) {
 
 export async function findUserByEmail(email) {
   const result = await pool.query(
-    'SELECT id_usuario AS id, correo AS email, "contraseña" AS password FROM usuario WHERE correo = $1',
+    'SELECT id_usuario AS id, correo AS email, primer_nombre AS nombre, primer_apellido AS apellidos, id_roles AS rol, "contraseña" AS password FROM usuario WHERE correo = $1',
     [email.toLowerCase().trim()]
   );
   return result.rows[0] || null;
