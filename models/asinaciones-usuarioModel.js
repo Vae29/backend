@@ -34,9 +34,10 @@ export async function fetchCultivosPorFinca(fincaId) {
       `SELECT 
         c.idcultivo AS id, 
         c.nombre, 
+        c.idtipocultivo AS idtipocultivo,
         tc.nombre AS tipo,
-        c.fecha_inicio AS fechaInicio,
-        c.fecha_final AS fechaCosecha,
+        c.fecha_inicio AS "fechaInicio",
+        c.fecha_final AS "fechaCosecha",
         e.nombre AS estado,
         c.idestado
        FROM cultivo c
@@ -49,6 +50,75 @@ export async function fetchCultivosPorFinca(fincaId) {
     return result.rows;
   } catch (error) {
     console.error('Error fetching cultivos por finca:', error);
+    throw error;
+  }
+}
+
+export async function fetchTiposCultivo() {
+  try {
+    const result = await pool.query(
+      'SELECT idtipocultivo AS id, nombre FROM tipos_cultivo ORDER BY nombre'
+    );
+    return result.rows;
+  } catch (error) {
+    console.error('Error fetching tipos de cultivo:', error);
+    throw error;
+  }
+}
+
+export async function fetchEstados() {
+  try {
+    const result = await pool.query(
+      'SELECT idestado AS id, nombre FROM estado ORDER BY nombre'
+    );
+    return result.rows;
+  } catch (error) {
+    console.error('Error fetching estados:', error);
+    throw error;
+  }
+}
+
+export async function fetchEstadoById(idestado) {
+  try {
+    const result = await pool.query('SELECT nombre FROM estado WHERE idestado = $1 LIMIT 1', [idestado]);
+    return result.rows[0]?.nombre || null;
+  } catch (error) {
+    console.error('Error fetching estado by id:', error);
+    throw error;
+  }
+}
+
+export async function updateCultivo(idcultivo, { nombre, idtipocultivo, idestado, fecha_inicio, fecha_final = null }) {
+  try {
+    const result = await pool.query(
+      `UPDATE cultivo
+       SET nombre = $1,
+           idtipocultivo = $2,
+           idestado = $3,
+           fecha_inicio = $4,
+           fecha_final = $5
+       WHERE idcultivo = $6
+       RETURNING idcultivo AS id, nombre, idfinca, idtipocultivo, idestado, fecha_inicio AS "fechaInicio", fecha_final AS "fechaCosecha"`,
+      [nombre, idtipocultivo, idestado, fecha_inicio, fecha_final, idcultivo]
+    );
+    return result.rows[0];
+  } catch (error) {
+    console.error('Error updating cultivo:', error);
+    throw error;
+  }
+}
+
+export async function createCultivo({ nombre, idtipocultivo, idfinca }) {
+  try {
+    const result = await pool.query(
+      `INSERT INTO cultivo (nombre, idtipocultivo, idfinca, idestado, fecha_inicio)
+       VALUES ($1, $2, $3, 1, CURRENT_DATE)
+       RETURNING idcultivo AS id, nombre, idfinca, idtipocultivo`,
+      [nombre, idtipocultivo, idfinca]
+    );
+    return result.rows[0];
+  } catch (error) {
+    console.error('Error creating cultivo:', error);
     throw error;
   }
 }
