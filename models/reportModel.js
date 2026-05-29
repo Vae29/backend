@@ -68,7 +68,10 @@ function buildCommonWhere(filters, params) {
     params.push(Number(usuarioId));
     where.push(`u.id_usuario = $${params.length}`);
   }
-  if (estado) {
+  if (estadoId) {
+    params.push(Number(estadoId));
+    where.push(`e.idestado = $${params.length}`);
+  } else if (estado) {
     params.push(String(estado));
     where.push(`LOWER(e.nombre) = LOWER($${params.length})`);
   }
@@ -208,7 +211,7 @@ export async function reportByTrabajador(filters = {}) {
   try {
     const params = [];
     let where = [];
-    const { fincaId, cultivoId, usuarioId, estado, fechaInicio, fechaFin } = filters || {};
+    const { fincaId, cultivoId, usuarioId, estado, estadoId, fechaInicio, fechaFin } = filters || {};
 
     if (usuarioId) {
       params.push(Number(usuarioId));
@@ -222,7 +225,10 @@ export async function reportByTrabajador(filters = {}) {
       params.push(Number(cultivoId));
       where.push(`cu.idcultivo = $${params.length}`);
     }
-    if (estado) {
+    if (estadoId) {
+      params.push(Number(estadoId));
+      where.push(`e.idestado = $${params.length}`);
+    } else if (estado) {
       params.push(String(estado));
       where.push(`LOWER(e.nombre) = LOWER($${params.length})`);
     }

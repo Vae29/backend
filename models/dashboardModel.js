@@ -43,6 +43,8 @@ export async function findDashboardByFinca(fincaId) {
   `;
 
   const rentabilidadQuery = `
+    -- Datos de rentabilidad por cultivo para el dashboard.
+    -- Se calculan ingresos, costos y ganancia a partir de las tablas cultivo, costo y cosecha.
     WITH cultivos AS (
       SELECT c.idcultivo,
              c.nombre,
@@ -72,7 +74,12 @@ export async function findDashboardByFinca(fincaId) {
       COALESCE(TO_CHAR(cultivos.fecha_final, 'DD/MM/YYYY'), '--') AS fecha_final,
       COALESCE(costos.total_costos, 0) AS costo,
       COALESCE(ingresos.total_ingresos, 0) AS ingresos,
-      COALESCE(ingresos.total_ingresos, 0) - COALESCE(costos.total_costos, 0) AS ganancia
+      COALESCE(ingresos.total_ingresos, 0) - COALESCE(costos.total_costos, 0) AS ganancia,
+      CASE
+        WHEN COALESCE(ingresos.total_ingresos, 0) > 0
+        THEN ((COALESCE(ingresos.total_ingresos, 0) - COALESCE(costos.total_costos, 0)) / COALESCE(ingresos.total_ingresos, 1)) * 100
+        ELSE 0
+      END AS margen
     FROM cultivos
     LEFT JOIN costos ON cultivos.idcultivo = costos.idcultivo
     LEFT JOIN ingresos ON cultivos.idcultivo = ingresos.idcultivo
@@ -281,6 +288,7 @@ export async function findDashboardByFinca(fincaId) {
     ingresos: toNumber(row.ingresos),
     costo: toNumber(row.costo),
     ganancia: toNumber(row.ganancia),
+    margen: Number.isFinite(Number(row.margen)) ? Number(row.margen) : 0,
   }));
 
   const cultivosEstado = rentability.map((row) => ({
