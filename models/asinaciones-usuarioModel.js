@@ -168,3 +168,31 @@ export async function assignCultivosToUser(userId, cultivoIds) {
     throw error;
   }
 }
+
+export async function deleteCultivoById(idcultivo) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Eliminar asignaciones de usuario
+    await client.query('DELETE FROM usuario_cultivo WHERE idcultivo = $1', [idcultivo]);
+
+    // Eliminar costos asociados (tabla `costo` en singular)
+    await client.query('DELETE FROM costo WHERE idcultivo = $1', [idcultivo]);
+
+    // Eliminar cosechas asociadas (tabla `cosecha`)
+    await client.query('DELETE FROM cosecha WHERE idcultivo = $1', [idcultivo]);
+
+    // Finalmente eliminar el cultivo
+    const res = await client.query('DELETE FROM cultivo WHERE idcultivo = $1 RETURNING idcultivo AS id, nombre', [idcultivo]);
+
+    await client.query('COMMIT');
+    return res.rows[0] || null;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error deleting cultivo:', error);
+    throw error;
+  } finally {
+    client.release();
+  }
+}

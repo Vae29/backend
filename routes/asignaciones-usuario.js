@@ -1,5 +1,5 @@
 import express from 'express';
-import { getFincas, getCultivosEnProceso, getCultivosPorFinca, getTiposCultivo, getEstados, postCultivo, putCultivo } from '../controllers/asignaciones-usuarioController.js';
+import { getFincas, getCultivosEnProceso, getCultivosPorFinca, getTiposCultivo, getEstados, postCultivo, putCultivo, deleteCultivo } from '../controllers/asignaciones-usuarioController.js';
 
 const router = express.Router();
 
@@ -10,5 +10,6 @@ router.get('/tipos-cultivo', getTiposCultivo);
 router.get('/estados', getEstados);
 router.post('/cultivos', postCultivo);
 router.put('/cultivos/:id', putCultivo);
+router.delete('/cultivos/:id', deleteCultivo);
 
 export default router;

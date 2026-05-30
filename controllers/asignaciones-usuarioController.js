@@ -1,4 +1,5 @@
 import { fetchAllFincas, fetchCultivosEnProceso, fetchCultivosPorFinca, fetchTiposCultivo, fetchEstados, fetchEstadoById, createCultivo, updateCultivo } from '../models/asinaciones-usuarioModel.js';
+import { deleteCultivoById } from '../models/asinaciones-usuarioModel.js';
 
 export async function getFincas(req, res) {
   try {
@@ -142,5 +143,25 @@ export async function putCultivo(req, res) {
   } catch (error) {
     console.error('Error en putCultivo:', error);
     res.status(500).json({ success: false, message: 'Error al actualizar cultivo' });
+  }
+}
+
+export async function deleteCultivo(req, res) {
+  try {
+    const { id } = req.params;
+    const cultivoId = Number(id);
+    if (!cultivoId || isNaN(cultivoId)) {
+      return res.status(400).json({ success: false, message: 'ID de cultivo inválido' });
+    }
+
+    const deleted = await deleteCultivoById(cultivoId);
+    if (!deleted) {
+      return res.status(404).json({ success: false, message: 'Cultivo no encontrado' });
+    }
+
+    res.json({ success: true, data: deleted });
+  } catch (error) {
+    console.error('Error en deleteCultivo:', error);
+    res.status(500).json({ success: false, message: 'Error al eliminar cultivo' });
   }
 }
