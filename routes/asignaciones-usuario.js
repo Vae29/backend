@@ -1,5 +1,6 @@
 import express from 'express';
-import { getFincas, getCultivosEnProceso, getCultivosPorFinca, getCultivoDetalle, getCategoriasCosto, getSubcategoriasPorCategoria, getEstadosPago, getEtapaEnProcesoPorCultivo, getEtapasPorCultivo, validateCultivoForCost, getTiposCultivo, getEstados, postCultivo, postCosto, putCultivo, deleteCultivo, getEtapasCatalog, postEtapaPorCultivo } from '../controllers/asignaciones-usuarioController.js';
+import { getFincas, getCultivosEnProceso, getCultivosPorFinca, getCultivoDetalle, getCategoriasCosto, getSubcategoriasPorCategoria, getEstadosPago, getEtapaEnProcesoPorCultivo, getEtapasPorCultivo, validateCultivoForCost, getTiposCultivo, getEstados, postCultivo, postCosto, putCultivo, deleteCultivo, getEtapasCatalog, postEtapaPorCultivo, getFincasPorUsuario, getCultivosPorUsuario } from '../controllers/asignaciones-usuarioController.js';
+import { verificarAccessToken, verificarWorker } from '../middleware/auth.js'
 
 const router = express.Router();
 
@@ -17,6 +18,8 @@ router.get('/cultivos/:cultivoId/validate-for-cost', validateCultivoForCost);
 router.get('/cultivos/:cultivoId/etapas', getEtapasPorCultivo);
 router.get('/tipos-cultivo', getTiposCultivo);
 router.get('/estados', getEstados);
+router.get('/usuario/me/fincas', verificarAccessToken, verificarWorker, getFincasPorUsuario);
+router.get('/usuario/me/cultivos', verificarAccessToken, verificarWorker, getCultivosPorUsuario);
 router.post('/cultivos', postCultivo);
 router.post('/costos', postCosto);
 router.put('/cultivos/:id', putCultivo);

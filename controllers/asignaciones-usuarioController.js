@@ -1,4 +1,4 @@
-import { fetchAllFincas, fetchCultivosEnProceso, fetchCultivosPorFinca, fetchCultivoDetalleById, fetchCategoriasCosto, fetchSubcategoriasPorCategoria, fetchEstadosPago, fetchEtapaEnProcesoPorCultivo, validateCultivoCanAddCosto, createCosto, fetchTiposCultivo, fetchEstados, fetchEstadoById, createCultivo, updateCultivo } from '../models/asinaciones-usuarioModel.js';
+import { fetchAllFincas, fetchCultivosEnProceso, fetchCultivosPorFinca, fetchCultivoDetalleById, fetchCategoriasCosto, fetchSubcategoriasPorCategoria, fetchEstadosPago, fetchEtapaEnProcesoPorCultivo, validateCultivoCanAddCosto, createCosto, fetchTiposCultivo, fetchEstados, fetchEstadoById, createCultivo, updateCultivo, fetchCultivosPorUsuario, fetchFincasPorUsuario } from '../models/asinaciones-usuarioModel.js';
 import { fetchEtapasPorCultivo, fetchAllEtapasCatalog, finalizeEtapaEnProceso, createEtapaParaCultivo } from '../models/asinaciones-usuarioModel.js';
 import { deleteCultivoById } from '../models/asinaciones-usuarioModel.js';
 
@@ -15,6 +15,20 @@ export async function getFincas(req, res) {
       success: false,
       message: 'Error al obtener fincas',
     });
+  }
+}
+
+export async function getFincasPorUsuario(req, res) {
+  try {
+    const userId = req.user?.id
+    if (!userId) {
+      return res.status(401).json({ success: false, message: 'Usuario no autenticado' })
+    }
+    const fincas = await fetchFincasPorUsuario(Number(userId))
+    res.json({ success: true, data: fincas })
+  } catch (error) {
+    console.error('Error en getFincasPorUsuario:', error)
+    res.status(500).json({ success: false, message: 'Error al obtener fincas del usuario' })
   }
 }
 
@@ -230,6 +244,23 @@ export async function getEtapasPorCultivo(req, res) {
   } catch (error) {
     console.error('Error en getEtapasPorCultivo:', error)
     res.status(500).json({ success: false, message: 'Error al obtener etapas del cultivo' })
+  }
+}
+
+export async function getCultivosPorUsuario(req, res) {
+  try {
+    const userId = req.user?.id
+    if (!userId) {
+      return res.status(401).json({ success: false, message: 'Usuario no autenticado' })
+    }
+    const fincaId = req.query.fincaId ? Number(req.query.fincaId) : null
+    console.log('[DEBUG] getCultivosPorUsuario - req.user.id:', userId, 'fincaId:', fincaId)
+    const data = await fetchCultivosPorUsuario(Number(userId), fincaId)
+    console.log('[DEBUG] getCultivosPorUsuario - result count:', Array.isArray(data) ? data.length : 0)
+    res.json({ success: true, data })
+  } catch (error) {
+    console.error('Error en getCultivosPorUsuario:', error)
+    res.status(500).json({ success: false, message: 'Error al obtener cultivos del usuario' })
   }
 }
 
