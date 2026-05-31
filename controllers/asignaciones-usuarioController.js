@@ -359,34 +359,84 @@ export async function validateCultivoForCost(req, res) {
 
 export async function postCosto(req, res) {
   try {
-    const { descripcion, valor, idcultivo, idetapa_cultivo, idusuario, idsubcategoria, idfinca, idestado_pago } = req.body;
-    if (!valor || !idcultivo || !idusuario || !idsubcategoria || !idfinca || !idestado_pago) {
+    const descripcion = req.body.descripcion?.trim() || null
+    const valor = Number(req.body.valor)
+    const idcultivo = Number(req.body.idcultivo)
+    const idetapa_cultivo = Number(req.body.idetapa_cultivo)
+    const idusuario = Number(req.user?.id ?? req.body.idusuario)
+    const idsubcategoria = Number(req.body.idsubcategoria)
+    const idfinca = Number(req.body.idfinca)
+    const idestado_pago = Number(req.body.idestado_pago)
+
+    if (Number.isNaN(valor) || valor <= 0) {
       return res.status(400).json({
         success: false,
-        message: 'Información incompleta para crear el costo',
-      });
+        message: 'El valor del costo debe ser un número mayor a 0',
+      })
+    }
+
+    if (Number.isNaN(idcultivo) || idcultivo <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'ID de cultivo inválido',
+      })
+    }
+
+    if (Number.isNaN(idusuario) || idusuario <= 0) {
+      return res.status(401).json({
+        success: false,
+        message: 'Usuario no autenticado o inválido',
+      })
+    }
+
+    if (Number.isNaN(idsubcategoria) || idsubcategoria <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'ID de subcategoría inválido',
+      })
+    }
+
+    if (Number.isNaN(idfinca) || idfinca <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'ID de finca inválido',
+      })
+    }
+
+    if (Number.isNaN(idestado_pago) || idestado_pago <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'ID de estado de pago inválido',
+      })
     }
 
     const costo = await createCosto({
       descripcion,
       valor,
       idcultivo,
-      idetapa_cultivo,
+      idetapa_cultivo: Number.isNaN(idetapa_cultivo) ? null : idetapa_cultivo,
       idusuario,
       idsubcategoria,
       idfinca,
       idestado_pago,
-    });
+    })
+
     res.status(201).json({
       success: true,
       data: costo,
-    });
+    })
   } catch (error) {
-    console.error('Error en postCosto:', error);
+    console.error('Error en postCosto:', error)
+    if (error?.code === '23503') {
+      return res.status(400).json({
+        success: false,
+        message: error.detail || 'Referencia inválida al crear el costo',
+      })
+    }
     res.status(500).json({
       success: false,
       message: 'Error al crear el costo',
-    });
+    })
   }
 }
 

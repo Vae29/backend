@@ -22,7 +22,7 @@ router.get('/estados', getEstados);
 router.get('/usuario/me/fincas', verificarAccessToken, verificarWorker, getFincasPorUsuario);
 router.get('/usuario/me/cultivos', verificarAccessToken, verificarWorker, getCultivosPorUsuario);
 router.post('/cultivos', postCultivo);
-router.post('/costos', postCosto);
+router.post('/costos', verificarAccessToken, postCosto);
 router.put('/cultivos/:id', putCultivo);
 router.delete('/cultivos/:id', deleteCultivo);
 
