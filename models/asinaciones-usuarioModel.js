@@ -221,6 +221,70 @@ export async function createEtapaParaCultivo({ idcultivo, idetapa, descripcion }
   }
 }
 
+export async function updateEtapaParaCultivo(
+  idetapacultivo,
+  { descripcion, idestado },
+  { forceFinalize = false, forceEnProceso = false } = {}
+) {
+  try {
+    const etapaResult = await pool.query(
+      'SELECT idcultivo FROM etapa_cultivo WHERE idetapacultivo = $1',
+      [idetapacultivo]
+    )
+
+    if (!etapaResult.rows.length) {
+      return null
+    }
+
+    const cultivoId = etapaResult.rows[0].idcultivo
+    const inProcessId = 1
+    const finalizadoRes = await pool.query("SELECT idestado FROM estado WHERE LOWER(nombre) LIKE 'finaliz%' LIMIT 1")
+    const finalizadoId = finalizadoRes.rows[0]?.idestado || null
+
+    if (forceFinalize && cultivoId && finalizadoId) {
+      await pool.query(
+        `UPDATE etapa_cultivo
+         SET idestado = $1, fecha_final = CURRENT_DATE
+         WHERE idcultivo = $2 AND idestado = $3 AND idetapacultivo != $4`,
+        [finalizadoId, cultivoId, inProcessId, idetapacultivo]
+      )
+    }
+
+    const setClauses = []
+    const values = []
+    let paramIndex = 1
+
+    if (descripcion !== undefined) {
+      setClauses.push(`descripcion = $${paramIndex++}`)
+      values.push(descripcion)
+    }
+
+    if (idestado !== undefined) {
+      setClauses.push(`idestado = $${paramIndex++}`)
+      values.push(idestado)
+    }
+
+    if (forceEnProceso) {
+      setClauses.push('fecha_final = NULL')
+    } else if (idestado !== undefined && idestado === finalizadoId) {
+      setClauses.push('fecha_final = CURRENT_DATE')
+    }
+
+    if (setClauses.length === 0) {
+      return null
+    }
+
+    const query = `UPDATE etapa_cultivo SET ${setClauses.join(', ')} WHERE idetapacultivo = $${paramIndex} RETURNING idetapacultivo AS id, idetapa, descripcion, fecha_inicio AS "fechaInicio", fecha_final AS "fechaFinal", idestado, activo`
+    values.push(idetapacultivo)
+
+    const result = await pool.query(query, values)
+    return result.rows[0] || null
+  } catch (error) {
+    console.error('Error updating etapa para cultivo:', error)
+    throw error
+  }
+}
+
 export async function fetchTiposCultivo() {
   try {
     const result = await pool.query(

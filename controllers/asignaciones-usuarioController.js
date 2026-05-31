@@ -1,5 +1,5 @@
 import { fetchAllFincas, fetchCultivosEnProceso, fetchCultivosPorFinca, fetchCultivoDetalleById, fetchCategoriasCosto, fetchSubcategoriasPorCategoria, fetchEstadosPago, fetchEtapaEnProcesoPorCultivo, validateCultivoCanAddCosto, createCosto, fetchTiposCultivo, fetchEstados, fetchEstadoById, createCultivo, updateCultivo, fetchCultivosPorUsuario, fetchFincasPorUsuario } from '../models/asinaciones-usuarioModel.js';
-import { fetchEtapasPorCultivo, fetchAllEtapasCatalog, finalizeEtapaEnProceso, createEtapaParaCultivo } from '../models/asinaciones-usuarioModel.js';
+import { fetchEtapasPorCultivo, fetchAllEtapasCatalog, finalizeEtapaEnProceso, createEtapaParaCultivo, updateEtapaParaCultivo } from '../models/asinaciones-usuarioModel.js';
 import { deleteCultivoById } from '../models/asinaciones-usuarioModel.js';
 
 export async function getFincas(req, res) {
@@ -298,6 +298,37 @@ export async function postEtapaPorCultivo(req, res) {
   } catch (error) {
     console.error('Error en postEtapaPorCultivo:', error)
     res.status(500).json({ success: false, message: 'Error al crear etapa para cultivo' })
+  }
+}
+
+export async function putEtapaPorCultivo(req, res) {
+  try {
+    const etapaId = Number(req.params.id)
+    if (!etapaId || Number.isNaN(etapaId)) {
+      return res.status(400).json({ success: false, message: 'ID de etapa inválido' })
+    }
+
+    const { descripcion, idestado, forceFinalize, forceEnProceso } = req.body
+    const updated = await updateEtapaParaCultivo(
+      etapaId,
+      {
+        descripcion: descripcion !== undefined ? descripcion : undefined,
+        idestado: idestado !== undefined ? Number(idestado) : undefined,
+      },
+      {
+        forceFinalize: Boolean(forceFinalize),
+        forceEnProceso: Boolean(forceEnProceso),
+      }
+    )
+
+    if (!updated) {
+      return res.status(404).json({ success: false, message: 'Etapa no encontrada' })
+    }
+
+    res.json({ success: true, data: updated })
+  } catch (error) {
+    console.error('Error en putEtapaPorCultivo:', error)
+    res.status(500).json({ success: false, message: 'Error al actualizar etapa del cultivo' })
   }
 }
 
