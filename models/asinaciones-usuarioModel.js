@@ -3,7 +3,7 @@ import pool from '../config/db.js';
 export async function fetchAllFincas() {
   try {
     const result = await pool.query(
-      'SELECT idfinca AS id, nombre, ubicacion FROM finca ORDER BY nombre'
+      'SELECT idfinca AS id, nombre, ubicacion FROM finca WHERE activo = TRUE ORDER BY nombre'
     );
     return result.rows;
   } catch (error) {
@@ -19,6 +19,8 @@ export async function fetchCultivosEnProceso() {
        FROM cultivo c
        LEFT JOIN finca f ON c.idfinca = f.idfinca
        WHERE c.idestado = 1
+         AND c.activo = TRUE
+         AND f.activo = TRUE
        ORDER BY f.nombre, c.nombre`
     );
     return result.rows;
@@ -39,11 +41,15 @@ export async function fetchCultivosPorFinca(fincaId) {
         c.fecha_inicio AS "fechaInicio",
         c.fecha_final AS "fechaCosecha",
         e.nombre AS estado,
-        c.idestado
+        c.idestado,
+        c.activo
        FROM cultivo c
        LEFT JOIN tipos_cultivo tc ON c.idtipocultivo = tc.idtipocultivo
        LEFT JOIN estado e ON c.idestado = e.idestado
+       LEFT JOIN finca f ON c.idfinca = f.idfinca
        WHERE c.idfinca = $1
+         AND c.activo = TRUE
+         AND f.activo = TRUE
        ORDER BY c.nombre`,
       [fincaId]
     );
@@ -51,6 +57,108 @@ export async function fetchCultivosPorFinca(fincaId) {
   } catch (error) {
     console.error('Error fetching cultivos por finca:', error);
     throw error;
+  }
+}
+
+export async function fetchCultivoDetalleById(idcultivo) {
+  try {
+    const result = await pool.query(
+      `SELECT
+        co.idcosto AS id,
+        co.fecha,
+        co.descripcion,
+        co.valor,
+        COALESCE(u.primer_nombre || ' ' || u.primer_apellido, '') AS usuario,
+        sc.nombre AS subcategoria,
+        cc.nombre AS categoria,
+        et.nombre_etapa AS etapa,
+        ep.nombre AS estado_pago
+      FROM costo co
+      LEFT JOIN subcategoria_costo sc ON co.idsubcategoria = sc.idsubcategoria
+      LEFT JOIN categoria_costo cc ON sc.idcategoria = cc.idcategoria
+      LEFT JOIN usuario u ON co.id_usuario = u.id_usuario
+      LEFT JOIN etapa_cultivo ec ON co.idetapa_cultivo = ec.idetapacultivo
+      LEFT JOIN etapas et ON ec.idetapa = et.idetapa
+      LEFT JOIN estado_pago ep ON co.idestado_pago = ep.idestado_pago
+      WHERE co.idcultivo = $1
+      ORDER BY co.fecha DESC`,
+      [idcultivo]
+    );
+    return result.rows;
+  } catch (error) {
+    console.error('Error fetching detalle de cultivo:', error);
+    throw error;
+  }
+}
+
+export async function fetchEtapasPorCultivo(idcultivo) {
+  try {
+    const result = await pool.query(
+      `SELECT
+         ec.idetapacultivo AS id,
+         et.nombre_etapa AS nombre,
+         ec.descripcion,
+         ec.fecha_inicio AS "fechaInicio",
+         ec.fecha_final AS "fechaFinal",
+         ec.idestado,
+         e.nombre AS estado,
+         ec.activo
+       FROM etapa_cultivo ec
+       LEFT JOIN etapas et ON ec.idetapa = et.idetapa
+       LEFT JOIN estado e ON ec.idestado = e.idestado
+       WHERE ec.idcultivo = $1 AND ec.activo = TRUE
+       ORDER BY ec.fecha_inicio DESC`,
+      [idcultivo]
+    );
+    return result.rows;
+  } catch (error) {
+    console.error('Error fetching etapas por cultivo:', error);
+    throw error;
+  }
+}
+
+export async function fetchAllEtapasCatalog() {
+  try {
+    const result = await pool.query(
+      'SELECT idetapa AS id, nombre_etapa AS nombre FROM etapas ORDER BY nombre_etapa'
+    )
+    return result.rows
+  } catch (error) {
+    console.error('Error fetching etapas catalog:', error)
+    throw error
+  }
+}
+
+export async function finalizeEtapaEnProceso(idcultivo) {
+  try {
+    // find idestado for 'finalizado'
+    const estadoRes = await pool.query("SELECT idestado FROM estado WHERE LOWER(nombre) LIKE 'finaliz%' LIMIT 1")
+    const finalizadoId = estadoRes.rows[0]?.idestado || 2
+    const result = await pool.query(
+      `UPDATE etapa_cultivo SET idestado = $2, fecha_final = CURRENT_DATE WHERE idcultivo = $1 AND idestado = 1 RETURNING idetapacultivo AS id, idetapa, descripcion, fecha_inicio AS "fechaInicio", fecha_final AS "fechaFinal", idestado, activo`,
+      [idcultivo, finalizadoId]
+    )
+    return result.rows
+  } catch (error) {
+    console.error('Error finalizing etapa en proceso:', error)
+    throw error
+  }
+}
+
+export async function createEtapaParaCultivo({ idcultivo, idetapa, descripcion }) {
+  try {
+    // assume 'en proceso' has idestado = 1
+    const inProcessId = 1
+    const result = await pool.query(
+      `INSERT INTO etapa_cultivo (idetapa, idcultivo, descripcion, fecha_inicio, idestado, activo)
+       VALUES ($1, $2, $3, CURRENT_DATE, $4, TRUE)
+       RETURNING idetapacultivo AS id, idetapa, descripcion, fecha_inicio AS "fechaInicio", fecha_final AS "fechaFinal", idestado, activo`,
+      [idetapa, idcultivo, descripcion || null, inProcessId]
+    )
+    return result.rows[0]
+  } catch (error) {
+    console.error('Error creating etapa para cultivo:', error)
+    throw error
   }
 }
 
@@ -169,30 +277,121 @@ export async function assignCultivosToUser(userId, cultivoIds) {
   }
 }
 
-export async function deleteCultivoById(idcultivo) {
-  const client = await pool.connect();
+export async function fetchCategoriasCosto() {
   try {
-    await client.query('BEGIN');
-
-    // Eliminar asignaciones de usuario
-    await client.query('DELETE FROM usuario_cultivo WHERE idcultivo = $1', [idcultivo]);
-
-    // Eliminar costos asociados (tabla `costo` en singular)
-    await client.query('DELETE FROM costo WHERE idcultivo = $1', [idcultivo]);
-
-    // Eliminar cosechas asociadas (tabla `cosecha`)
-    await client.query('DELETE FROM cosecha WHERE idcultivo = $1', [idcultivo]);
-
-    // Finalmente eliminar el cultivo
-    const res = await client.query('DELETE FROM cultivo WHERE idcultivo = $1 RETURNING idcultivo AS id, nombre', [idcultivo]);
-
-    await client.query('COMMIT');
-    return res.rows[0] || null;
+    const result = await pool.query(
+      'SELECT idcategoria AS id, nombre FROM categoria_costo ORDER BY nombre'
+    );
+    return result.rows;
   } catch (error) {
-    await client.query('ROLLBACK');
-    console.error('Error deleting cultivo:', error);
+    console.error('Error fetching categorias costo:', error);
     throw error;
-  } finally {
-    client.release();
   }
+}
+
+export async function fetchSubcategoriasPorCategoria(idcategoria) {
+  try {
+    const result = await pool.query(
+      'SELECT idsubcategoria AS id, nombre FROM subcategoria_costo WHERE idcategoria = $1 ORDER BY nombre',
+      [idcategoria]
+    );
+    return result.rows;
+  } catch (error) {
+    console.error('Error fetching subcategorias:', error);
+    throw error;
+  }
+}
+
+export async function fetchEstadosPago() {
+  try {
+    const result = await pool.query(
+      'SELECT idestado_pago AS id, nombre FROM estado_pago ORDER BY nombre'
+    );
+    return result.rows;
+  } catch (error) {
+    console.error('Error fetching estados pago:', error);
+    throw error;
+  }
+}
+
+export async function fetchEtapaEnProcesoPorCultivo(idcultivo) {
+  try {
+    const result = await pool.query(
+      `SELECT ec.idetapacultivo, et.nombre_etapa
+       FROM etapa_cultivo ec
+       LEFT JOIN etapas et ON ec.idetapa = et.idetapa
+       WHERE ec.idcultivo = $1 AND ec.idestado = 1
+       LIMIT 1`,
+      [idcultivo]
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Error fetching etapa en proceso:', error);
+    throw error;
+  }
+}
+
+export async function validateCultivoCanAddCosto(idcultivo) {
+  try {
+    // Verificar si el cultivo está en estado "En Proceso" (idestado = 1)
+    const cultivoResult = await pool.query(
+      'SELECT idestado FROM cultivo WHERE idcultivo = $1 AND activo = TRUE',
+      [idcultivo]
+    );
+    if (!cultivoResult.rows.length) {
+      return { valid: false, reason: 'cultivo_not_found' };
+    }
+
+    const cultivo = cultivoResult.rows[0];
+    // Asumiendo que 1 es "En Proceso"
+    if (cultivo.idestado !== 1) {
+      return { valid: false, reason: 'cultivo_not_in_process' };
+    }
+
+    // Verificar si hay etapas registradas
+    const etapasResult = await pool.query(
+      'SELECT COUNT(*) as count FROM etapa_cultivo WHERE idcultivo = $1',
+      [idcultivo]
+    );
+    if (etapasResult.rows[0].count === 0) {
+      return { valid: false, reason: 'no_etapas' };
+    }
+
+    // Verificar si hay etapa en proceso
+    const etapaEnProcesoResult = await pool.query(
+      'SELECT COUNT(*) as count FROM etapa_cultivo WHERE idcultivo = $1 AND idestado = 1',
+      [idcultivo]
+    );
+    if (etapaEnProcesoResult.rows[0].count === 0) {
+      return { valid: false, reason: 'no_etapa_en_proceso' };
+    }
+
+    return { valid: true };
+  } catch (error) {
+    console.error('Error validating cultivo for cost:', error);
+    throw error;
+  }
+}
+
+export async function createCosto({ descripcion, valor, idcultivo, idetapa_cultivo, idusuario, idsubcategoria, idfinca, idestado_pago }) {
+  try {
+    const result = await pool.query(
+      `INSERT INTO costo (descripcion, valor, fecha, idcultivo, idetapa_cultivo, id_usuario, idsubcategoria, idfinca, idestado_pago)
+       VALUES ($1, $2, CURRENT_DATE, $3, $4, $5, $6, $7, $8)
+       RETURNING idcosto AS id, descripcion, valor, fecha, idcultivo, idetapa_cultivo AS etapaCultivoId`,
+      [descripcion || null, valor, idcultivo, idetapa_cultivo, idusuario, idsubcategoria, idfinca, idestado_pago]
+    );
+    return result.rows[0];
+  } catch (error) {
+    console.error('Error creating costo:', error);
+    throw error;
+  }
+}
+
+export async function deleteCultivoById(idcultivo) {
+  const result = await pool.query(
+    'UPDATE cultivo SET activo = FALSE WHERE idcultivo = $1 RETURNING idcultivo AS id, nombre',
+    [idcultivo]
+  );
+  return result.rows[0] || null;
 }

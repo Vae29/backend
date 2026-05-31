@@ -7,7 +7,8 @@ export async function findFincas(search = '') {
     const result = await pool.query(
       `SELECT idfinca AS id, nombre, ubicacion
        FROM finca
-       WHERE nombre ILIKE $1
+       WHERE activo = TRUE
+         AND nombre ILIKE $1
        ORDER BY nombre`,
       [`%${trimmed}%`]
     );
@@ -17,6 +18,7 @@ export async function findFincas(search = '') {
   const result = await pool.query(
     `SELECT idfinca AS id, nombre, ubicacion
      FROM finca
+     WHERE activo = TRUE
      ORDER BY nombre`
   );
   return result.rows;
@@ -24,8 +26,8 @@ export async function findFincas(search = '') {
 
 export async function createFinca(nombre, ubicacion) {
   const result = await pool.query(
-    `INSERT INTO finca (nombre, ubicacion)
-     VALUES ($1, $2)
+    `INSERT INTO finca (nombre, ubicacion, activo)
+     VALUES ($1, $2, TRUE)
      RETURNING idfinca AS id, nombre, ubicacion`,
     [nombre, ubicacion]
   );
@@ -46,7 +48,8 @@ export async function updateFinca(id, nombre, ubicacion) {
 
 export async function deleteFinca(id) {
   const result = await pool.query(
-    `DELETE FROM finca
+    `UPDATE finca
+     SET activo = FALSE
      WHERE idfinca = $1
      RETURNING idfinca AS id`,
     [id]

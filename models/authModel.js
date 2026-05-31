@@ -2,7 +2,7 @@ import pool from '../config/db.js';
 
 export async function findUserByCredentials(email, password) {
   const result = await pool.query(
-    'SELECT id_usuario AS id, correo AS email, primer_nombre AS nombre, primer_apellido AS apellidos, id_roles AS rol FROM usuario WHERE correo = $1 AND "contraseña" = $2',
+    'SELECT id_usuario AS id, correo AS email, primer_nombre AS nombre, primer_apellido AS apellidos, id_roles AS rol FROM usuario WHERE correo = $1 AND "contraseña" = $2 AND activo = TRUE',
     [email.toLowerCase().trim(), password]
   );
   return result.rows[0] || null;
@@ -10,7 +10,7 @@ export async function findUserByCredentials(email, password) {
 
 export async function findUserByEmail(email) {
   const result = await pool.query(
-    'SELECT id_usuario AS id, correo AS email, primer_nombre AS nombre, primer_apellido AS apellidos, id_roles AS rol, "contraseña" AS password FROM usuario WHERE correo = $1',
+    'SELECT id_usuario AS id, correo AS email, primer_nombre AS nombre, primer_apellido AS apellidos, id_roles AS rol, "contraseña" AS password FROM usuario WHERE correo = $1 AND activo = TRUE',
     [email.toLowerCase().trim()]
   );
   return result.rows[0] || null;
@@ -28,6 +28,7 @@ export async function fetchAllUsers() {
       COALESCE((SELECT array_agg(idfinca) FROM usuario_finca uf WHERE uf.id_usuario = u.id_usuario), ARRAY[]::integer[]) AS fincas,
       COALESCE((SELECT array_agg(idcultivo) FROM usuario_cultivo uc WHERE uc.id_usuario = u.id_usuario), ARRAY[]::integer[]) AS cultivos
     FROM usuario u
+    WHERE u.activo = TRUE
     ORDER BY u.id_usuario`
   );
   return result.rows;
@@ -36,7 +37,7 @@ export async function fetchAllUsers() {
 export async function createUser({ nombre, apellidos, correo, contraseña, rol, fincas = [], cultivos = [] }) {
   const roleId = rol === 'administrador' ? 1 : 2
   const result = await pool.query(
-    'INSERT INTO usuario (primer_nombre, primer_apellido, correo, "contraseña", id_roles) VALUES ($1, $2, $3, $4, $5) RETURNING id_usuario AS id, correo AS email, primer_nombre, primer_apellido, id_roles AS rol, "contraseña" AS password',
+    'INSERT INTO usuario (primer_nombre, primer_apellido, correo, "contraseña", id_roles, activo) VALUES ($1, $2, $3, $4, $5, TRUE) RETURNING id_usuario AS id, correo AS email, primer_nombre, primer_apellido, id_roles AS rol, "contraseña" AS password',
     [nombre, apellidos, correo, contraseña, roleId]
   )
   
@@ -103,7 +104,7 @@ export async function updateUser(id, { nombre, apellidos, correo, contraseña, r
 
 export async function deleteUser(id) {
   const result = await pool.query(
-    'DELETE FROM usuario WHERE id_usuario = $1 RETURNING id_usuario AS id',
+    'UPDATE usuario SET activo = FALSE WHERE id_usuario = $1 RETURNING id_usuario AS id',
     [id]
   )
   return result.rows[0]

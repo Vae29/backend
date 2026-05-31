@@ -87,13 +87,14 @@ export async function findDashboardByFinca(fincaId) {
   `;
 
   const costCategoryQuery = `
-    SELECT cc.nombre AS categoria,
-           COALESCE(SUM(co.valor), 0) AS total
-    FROM categoria_costo cc
-    LEFT JOIN costo co ON co.idcategoria = cc.idcategoria
-    LEFT JOIN cultivo cu ON co.idcultivo = cu.idcultivo AND cu.idfinca = $1
-    GROUP BY cc.nombre
-    ORDER BY total DESC, cc.nombre;
+      SELECT cc.nombre AS categoria,
+        COALESCE(SUM(co.valor), 0) AS total
+      FROM categoria_costo cc
+      LEFT JOIN subcategoria_costo sc ON sc.idcategoria = cc.idcategoria
+      LEFT JOIN costo co ON co.idsubcategoria = sc.idsubcategoria
+      LEFT JOIN cultivo cu ON co.idcultivo = cu.idcultivo AND cu.idfinca = $1
+      GROUP BY cc.nombre
+      ORDER BY total DESC, cc.nombre;
   `;
 
   const productionTrendQuery = `
@@ -154,7 +155,8 @@ export async function findDashboardByFinca(fincaId) {
            ) AS description
     FROM costo co
     JOIN finca_cultivos fc ON co.idcultivo = fc.idcultivo
-    LEFT JOIN categoria_costo cc ON co.idcategoria = cc.idcategoria
+    LEFT JOIN subcategoria_costo sc ON co.idsubcategoria = sc.idsubcategoria
+    LEFT JOIN categoria_costo cc ON sc.idcategoria = cc.idcategoria
 
     UNION ALL
 

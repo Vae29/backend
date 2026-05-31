@@ -1,4 +1,5 @@
-import { fetchAllFincas, fetchCultivosEnProceso, fetchCultivosPorFinca, fetchTiposCultivo, fetchEstados, fetchEstadoById, createCultivo, updateCultivo } from '../models/asinaciones-usuarioModel.js';
+import { fetchAllFincas, fetchCultivosEnProceso, fetchCultivosPorFinca, fetchCultivoDetalleById, fetchCategoriasCosto, fetchSubcategoriasPorCategoria, fetchEstadosPago, fetchEtapaEnProcesoPorCultivo, validateCultivoCanAddCosto, createCosto, fetchTiposCultivo, fetchEstados, fetchEstadoById, createCultivo, updateCultivo } from '../models/asinaciones-usuarioModel.js';
+import { fetchEtapasPorCultivo, fetchAllEtapasCatalog, finalizeEtapaEnProceso, createEtapaParaCultivo } from '../models/asinaciones-usuarioModel.js';
 import { deleteCultivoById } from '../models/asinaciones-usuarioModel.js';
 
 export async function getFincas(req, res) {
@@ -108,6 +109,221 @@ export async function getEstados(req, res) {
     res.status(500).json({
       success: false,
       message: 'Error al obtener estados',
+    });
+  }
+}
+
+export async function getCultivoDetalle(req, res) {
+  try {
+    const cultivoId = Number(req.params.id);
+    if (!cultivoId || Number.isNaN(cultivoId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'ID de cultivo inválido',
+      });
+    }
+
+    const detalle = await fetchCultivoDetalleById(cultivoId);
+    res.json({
+      success: true,
+      data: detalle,
+    });
+  } catch (error) {
+    console.error('Error en getCultivoDetalle:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al obtener el detalle del cultivo',
+    });
+  }
+}
+
+export async function getCategoriasCosto(req, res) {
+  try {
+    const data = await fetchCategoriasCosto();
+    res.json({
+      success: true,
+      data,
+    });
+  } catch (error) {
+    console.error('Error en getCategoriasCosto:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al obtener categorías de costo',
+    });
+  }
+}
+
+export async function getSubcategoriasPorCategoria(req, res) {
+  try {
+    const { categoriaId } = req.params;
+    const idcategoria = Number(categoriaId);
+    if (!idcategoria || Number.isNaN(idcategoria)) {
+      return res.status(400).json({
+        success: false,
+        message: 'ID de categoría inválido',
+      });
+    }
+
+    const data = await fetchSubcategoriasPorCategoria(idcategoria);
+    res.json({
+      success: true,
+      data,
+    });
+  } catch (error) {
+    console.error('Error en getSubcategoriasPorCategoria:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al obtener subcategorías',
+    });
+  }
+}
+
+export async function getEstadosPago(req, res) {
+  try {
+    const data = await fetchEstadosPago();
+    res.json({
+      success: true,
+      data,
+    });
+  } catch (error) {
+    console.error('Error en getEstadosPago:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al obtener estados de pago',
+    });
+  }
+}
+
+export async function getEtapaEnProcesoPorCultivo(req, res) {
+  try {
+    const { cultivoId } = req.params;
+    const idcultivo = Number(cultivoId);
+    if (!idcultivo || Number.isNaN(idcultivo)) {
+      return res.status(400).json({
+        success: false,
+        message: 'ID de cultivo inválido',
+      });
+    }
+
+    const data = await fetchEtapaEnProcesoPorCultivo(idcultivo);
+    res.json({
+      success: true,
+      data,
+    });
+  } catch (error) {
+    console.error('Error en getEtapaEnProcesoPorCultivo:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al obtener etapa en proceso',
+    });
+  }
+}
+
+export async function getEtapasPorCultivo(req, res) {
+  try {
+    const cultivoId = Number(req.params.cultivoId)
+    if (!cultivoId || Number.isNaN(cultivoId)) {
+      return res.status(400).json({ success: false, message: 'ID de cultivo inválido' })
+    }
+    const data = await fetchEtapasPorCultivo(cultivoId)
+    res.json({ success: true, data })
+  } catch (error) {
+    console.error('Error en getEtapasPorCultivo:', error)
+    res.status(500).json({ success: false, message: 'Error al obtener etapas del cultivo' })
+  }
+}
+
+export async function getEtapasCatalog(req, res) {
+  try {
+    const data = await fetchAllEtapasCatalog()
+    res.json({ success: true, data })
+  } catch (error) {
+    console.error('Error en getEtapasCatalog:', error)
+    res.status(500).json({ success: false, message: 'Error al obtener catálogo de etapas' })
+  }
+}
+
+export async function postEtapaPorCultivo(req, res) {
+  try {
+    const cultivoId = Number(req.params.cultivoId)
+    if (!cultivoId || Number.isNaN(cultivoId)) {
+      return res.status(400).json({ success: false, message: 'ID de cultivo inválido' })
+    }
+    const { idetapa, descripcion, forceFinalize } = req.body
+    if (!idetapa) {
+      return res.status(400).json({ success: false, message: 'ID de etapa requerido' })
+    }
+
+    // If requested, finalize existing in-process etapa(s)
+    let finalized = []
+    if (forceFinalize) {
+      finalized = await finalizeEtapaEnProceso(cultivoId)
+    }
+
+    // Create new etapa as 'En Proceso'
+    const created = await createEtapaParaCultivo({ idcultivo: cultivoId, idetapa, descripcion })
+
+    res.status(201).json({ success: true, data: { finalized, created } })
+  } catch (error) {
+    console.error('Error en postEtapaPorCultivo:', error)
+    res.status(500).json({ success: false, message: 'Error al crear etapa para cultivo' })
+  }
+}
+
+export async function validateCultivoForCost(req, res) {
+  try {
+    const { cultivoId } = req.params;
+    const idcultivo = Number(cultivoId);
+    if (!idcultivo || Number.isNaN(idcultivo)) {
+      return res.status(400).json({
+        success: false,
+        message: 'ID de cultivo inválido',
+      });
+    }
+
+    const result = await validateCultivoCanAddCosto(idcultivo);
+    res.json({
+      success: true,
+      ...result,
+    });
+  } catch (error) {
+    console.error('Error en validateCultivoForCost:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error validando cultivo',
+    });
+  }
+}
+
+export async function postCosto(req, res) {
+  try {
+    const { descripcion, valor, idcultivo, idetapa_cultivo, idusuario, idsubcategoria, idfinca, idestado_pago } = req.body;
+    if (!valor || !idcultivo || !idusuario || !idsubcategoria || !idfinca || !idestado_pago) {
+      return res.status(400).json({
+        success: false,
+        message: 'Información incompleta para crear el costo',
+      });
+    }
+
+    const costo = await createCosto({
+      descripcion,
+      valor,
+      idcultivo,
+      idetapa_cultivo,
+      idusuario,
+      idsubcategoria,
+      idfinca,
+      idestado_pago,
+    });
+    res.status(201).json({
+      success: true,
+      data: costo,
+    });
+  } catch (error) {
+    console.error('Error en postCosto:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al crear el costo',
     });
   }
 }

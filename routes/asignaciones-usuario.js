@@ -1,14 +1,24 @@
 import express from 'express';
-import { getFincas, getCultivosEnProceso, getCultivosPorFinca, getTiposCultivo, getEstados, postCultivo, putCultivo, deleteCultivo } from '../controllers/asignaciones-usuarioController.js';
+import { getFincas, getCultivosEnProceso, getCultivosPorFinca, getCultivoDetalle, getCategoriasCosto, getSubcategoriasPorCategoria, getEstadosPago, getEtapaEnProcesoPorCultivo, getEtapasPorCultivo, validateCultivoForCost, getTiposCultivo, getEstados, postCultivo, postCosto, putCultivo, deleteCultivo, getEtapasCatalog, postEtapaPorCultivo } from '../controllers/asignaciones-usuarioController.js';
 
 const router = express.Router();
 
 router.get('/fincas', getFincas);
 router.get('/cultivos-en-proceso', getCultivosEnProceso);
 router.get('/cultivos/finca/:fincaId', getCultivosPorFinca);
+router.get('/cultivos/:id/detalle', getCultivoDetalle);
+router.get('/categorias-costo', getCategoriasCosto);
+router.get('/subcategorias-costo/:categoriaId', getSubcategoriasPorCategoria);
+router.get('/estados-pago', getEstadosPago);
+router.get('/cultivos/:cultivoId/etapa-en-proceso', getEtapaEnProcesoPorCultivo);
+router.get('/etapas', getEtapasCatalog);
+router.post('/cultivos/:cultivoId/etapas', postEtapaPorCultivo);
+router.get('/cultivos/:cultivoId/validate-for-cost', validateCultivoForCost);
+router.get('/cultivos/:cultivoId/etapas', getEtapasPorCultivo);
 router.get('/tipos-cultivo', getTiposCultivo);
 router.get('/estados', getEstados);
 router.post('/cultivos', postCultivo);
+router.post('/costos', postCosto);
 router.put('/cultivos/:id', putCultivo);
 router.delete('/cultivos/:id', deleteCultivo);
 

@@ -40,16 +40,6 @@ process.on('unhandledRejection', (reason, promise) => {
   console.error('UNHANDLED PROMISE REJECTION', { reason, promise });
 });
 
-process.on('SIGINT', () => {
-  console.log('SIGINT received, shutting down gracefully');
-  process.exit(0);
-});
-
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received, shutting down gracefully');
-  process.exit(0);
-});
-
 // Rutas
 app.use('/auth', authRoutes);
 app.use('/api/fincas', fincasRoutes);
@@ -64,4 +54,23 @@ const server = app.listen(PORT, () => {
 server.on('error', (error) => {
   console.error('Server error:', error);
   process.exit(1);
+});
+
+const gracefulShutdown = (signal) => {
+  console.log(`${signal} received, shutting down gracefully`);
+  server.close((err) => {
+    if (err) {
+      console.error('Error closing server:', err);
+      process.exit(1);
+    }
+    process.exit(0);
+  });
+};
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.once('SIGUSR2', () => {
+  server.close(() => {
+    process.kill(process.pid, 'SIGUSR2');
+  });
 });
