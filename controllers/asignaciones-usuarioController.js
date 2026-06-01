@@ -1,4 +1,4 @@
-import { fetchAllFincas, fetchCultivosEnProceso, fetchCultivosPorFinca, fetchCultivoDetalleById, fetchCategoriasCosto, fetchSubcategoriasPorCategoria, fetchEstadosPago, fetchEtapaEnProcesoPorCultivo, validateCultivoCanAddCosto, createCosto, fetchTiposCultivo, fetchEstados, fetchEstadoById, createCultivo, updateCultivo, fetchCultivosPorUsuario, fetchFincasPorUsuario } from '../models/asinaciones-usuarioModel.js';
+import { fetchAllFincas, fetchCultivosEnProceso, fetchCultivosPorFinca, fetchCultivoDetalleById, fetchCategoriasCosto, fetchSubcategoriasPorCategoria, fetchEstadosPago, fetchEtapaEnProcesoPorCultivo, validateCultivoCanAddCosto, createCosto, fetchTiposCultivo, fetchEstados, fetchEstadoById, createCultivo, updateCultivo, fetchCultivosPorUsuario, fetchFincasPorUsuario, deleteOrDeactivateEtapaById } from '../models/asinaciones-usuarioModel.js';
 import { fetchEtapasPorCultivo, fetchAllEtapasCatalog, finalizeEtapaEnProceso, createEtapaParaCultivo } from '../models/asinaciones-usuarioModel.js';
 import { deleteCultivoById } from '../models/asinaciones-usuarioModel.js';
 
@@ -301,6 +301,37 @@ export async function postEtapaPorCultivo(req, res) {
   }
 }
 
+export async function deleteEtapaPorCultivo(req, res) {
+  try {
+    const etapaCultivoId = Number(req.params.etapaCultivoId)
+    if (!etapaCultivoId || Number.isNaN(etapaCultivoId)) {
+      return res.status(400).json({ success: false, message: 'ID de etapa inválido' })
+    }
+
+    const result = await deleteOrDeactivateEtapaById(etapaCultivoId)
+    if (!result || !result.record) {
+      return res.status(404).json({ success: false, message: 'Etapa no encontrada' })
+    }
+
+    const message = result.action === 'deactivated'
+      ? 'La etapa tiene costos asociados. Se ha desactivado en lugar de eliminarse permanentemente.'
+      : 'Etapa eliminada correctamente.'
+
+    res.json({
+      success: true,
+      data: {
+        id: result.record.id,
+        action: result.action,
+        costCount: result.costCount,
+      },
+      message,
+    })
+  } catch (error) {
+    console.error('Error en deleteEtapaPorCultivo:', error)
+    res.status(500).json({ success: false, message: 'Error al eliminar la etapa' })
+  }
+}
+
 export async function validateCultivoForCost(req, res) {
   try {
     const { cultivoId } = req.params;
@@ -328,23 +359,43 @@ export async function validateCultivoForCost(req, res) {
 
 export async function postCosto(req, res) {
   try {
+    console.log('[DEBUG postCosto] req.body:', req.body);
     const { descripcion, valor, idcultivo, idetapa_cultivo, idusuario, idsubcategoria, idfinca, idestado_pago } = req.body;
-    if (!valor || !idcultivo || !idusuario || !idsubcategoria || !idfinca || !idestado_pago) {
+
+    // Parse numeric inputs robustly to avoid falsy checks failing (e.g., valor === 0)
+    const parsedValor = Number(valor);
+    const parsedIdcultivo = Number(idcultivo);
+    const parsedIdusuario = Number(idusuario);
+    const parsedIdsubcategoria = Number(req.body.idsubcategoria ?? idsubcategoria);
+    const parsedIdfinca = Number(idfinca);
+    const parsedIdestadoPago = Number(idestado_pago);
+
+    const missing = [];
+    if (!Number.isFinite(parsedValor) || parsedValor <= 0) missing.push('valor');
+    if (!Number.isFinite(parsedIdcultivo) || parsedIdcultivo <= 0) missing.push('idcultivo');
+    if (!Number.isFinite(parsedIdusuario) || parsedIdusuario <= 0) missing.push('idusuario');
+    if (!Number.isFinite(parsedIdsubcategoria) || parsedIdsubcategoria <= 0) missing.push('idsubcategoria');
+    if (!Number.isFinite(parsedIdfinca) || parsedIdfinca <= 0) missing.push('idfinca');
+    if (!Number.isFinite(parsedIdestadoPago) || parsedIdestadoPago <= 0) missing.push('idestado_pago');
+
+    if (missing.length > 0) {
       return res.status(400).json({
         success: false,
-        message: 'Información incompleta para crear el costo',
+        message: 'Información incompleta o inválida para crear el costo',
+        missing,
+        received: req.body,
       });
     }
 
     const costo = await createCosto({
       descripcion,
-      valor,
-      idcultivo,
+      valor: parsedValor,
+      idcultivo: parsedIdcultivo,
       idetapa_cultivo,
-      idusuario,
-      idsubcategoria,
-      idfinca,
-      idestado_pago,
+      idusuario: parsedIdusuario,
+      idsubcategoria: parsedIdsubcategoria,
+      idfinca: parsedIdfinca,
+      idestado_pago: parsedIdestadoPago,
     });
     res.status(201).json({
       success: true,
