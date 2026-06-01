@@ -37,16 +37,29 @@ export async function fetchCultivosPorFinca(fincaId) {
         c.idcultivo AS id, 
         c.nombre, 
         c.idtipocultivo AS idtipocultivo,
+        c.idfinca AS idfinca,
         tc.nombre AS tipo,
         c.fecha_inicio AS "fechaInicio",
         c.fecha_final AS "fechaCosecha",
         e.nombre AS estado,
         c.idestado,
-        c.activo
+        c.activo,
+        etapa_activa.nombre AS "etapaActual",
+        etapa_activa.fecha_inicio AS "etapaActualInicio"
        FROM cultivo c
        LEFT JOIN tipos_cultivo tc ON c.idtipocultivo = tc.idtipocultivo
        LEFT JOIN estado e ON c.idestado = e.idestado
        LEFT JOIN finca f ON c.idfinca = f.idfinca
+       LEFT JOIN LATERAL (
+         SELECT et.nombre_etapa AS nombre, ec.fecha_inicio
+         FROM etapa_cultivo ec
+         LEFT JOIN etapas et ON ec.idetapa = et.idetapa
+         WHERE ec.idcultivo = c.idcultivo
+           AND ec.idestado = 1
+           AND ec.activo = TRUE
+         ORDER BY ec.fecha_inicio DESC
+         LIMIT 1
+       ) etapa_activa ON TRUE
        WHERE c.idfinca = $1
          AND c.activo = TRUE
          AND f.activo = TRUE
@@ -221,6 +234,7 @@ export async function createEtapaParaCultivo({ idcultivo, idetapa, descripcion }
   }
 }
 
+<<<<<<< HEAD
 export async function updateEtapaParaCultivo(
   idetapacultivo,
   { descripcion, idestado },
@@ -282,6 +296,46 @@ export async function updateEtapaParaCultivo(
   } catch (error) {
     console.error('Error updating etapa para cultivo:', error)
     throw error
+=======
+export async function deleteOrDeactivateEtapaById(idetapaCultivo) {
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+
+    const countResult = await client.query(
+      'SELECT COUNT(*) AS count FROM costo WHERE idetapa_cultivo = $1',
+      [idetapaCultivo]
+    )
+    const costCount = Number(countResult.rows[0]?.count || 0)
+
+    let action = 'deleted'
+    let result
+    if (costCount > 0) {
+      result = await client.query(
+        'UPDATE etapa_cultivo SET activo = FALSE WHERE idetapacultivo = $1 RETURNING idetapacultivo AS id',
+        [idetapaCultivo]
+      )
+      action = 'deactivated'
+    } else {
+      result = await client.query(
+        'DELETE FROM etapa_cultivo WHERE idetapacultivo = $1 RETURNING idetapacultivo AS id',
+        [idetapaCultivo]
+      )
+    }
+
+    await client.query('COMMIT')
+    return {
+      action,
+      costCount,
+      record: result.rows[0] || null,
+    }
+  } catch (error) {
+    await client.query('ROLLBACK')
+    console.error('Error deleting or deactivating etapa:', error)
+    throw error
+  } finally {
+    client.release()
+>>>>>>> origin/isabella
   }
 }
 
@@ -485,8 +539,10 @@ export async function validateCultivoCanAddCosto(idcultivo) {
       'SELECT COUNT(*) as count FROM etapa_cultivo WHERE idcultivo = $1 AND idestado = 1',
       [idcultivo]
     );
+
     if (etapaEnProcesoResult.rows[0].count === 0) {
-      return { valid: false, reason: 'no_etapa_en_proceso' };
+      // No hay etapa en proceso, pero el cultivo sigue pudiendo registrar costos con la etapa más reciente
+      return { valid: true };
     }
 
     return { valid: true };

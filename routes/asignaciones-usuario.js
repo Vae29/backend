@@ -1,5 +1,5 @@
 import express from 'express';
-import { getFincas, getCultivosEnProceso, getCultivosPorFinca, getCultivoDetalle, getCategoriasCosto, getSubcategoriasPorCategoria, getEstadosPago, getEtapaEnProcesoPorCultivo, getEtapasPorCultivo, validateCultivoForCost, getTiposCultivo, getEstados, postCultivo, postCosto, putCultivo, putEtapaPorCultivo, deleteCultivo, getEtapasCatalog, postEtapaPorCultivo, getFincasPorUsuario, getCultivosPorUsuario } from '../controllers/asignaciones-usuarioController.js';
+import { getFincas, getCultivosEnProceso, getCultivosPorFinca, getCultivoDetalle, getCategoriasCosto, getSubcategoriasPorCategoria, getEstadosPago, getEtapaEnProcesoPorCultivo, getEtapasPorCultivo, validateCultivoForCost, getTiposCultivo, getEstados, postCultivo, postCosto, putCultivo, deleteCultivo, getEtapasCatalog, postEtapaPorCultivo, deleteEtapaPorCultivo, getFincasPorUsuario, getCultivosPorUsuario } from '../controllers/asignaciones-usuarioController.js';
 import { verificarAccessToken, verificarWorker } from '../middleware/auth.js'
 
 const router = express.Router();
@@ -25,5 +25,6 @@ router.post('/cultivos', postCultivo);
 router.post('/costos', verificarAccessToken, postCosto);
 router.put('/cultivos/:id', putCultivo);
 router.delete('/cultivos/:id', deleteCultivo);
+router.delete('/cultivos/etapas/:etapaCultivoId', deleteEtapaPorCultivo);
 
 export default router;

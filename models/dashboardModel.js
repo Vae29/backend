@@ -6,7 +6,36 @@ const toNumber = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-export async function findDashboardByFinca(fincaId) {
+const buildDashboardPeriodCondition = (alias, dateColumn) => {
+  return `($2 IS NULL OR EXTRACT(MONTH FROM ${alias}.${dateColumn})::int = $2) AND ($3 IS NULL OR EXTRACT(YEAR FROM ${alias}.${dateColumn})::int = $3)`;
+};
+
+const dashboardSeriesStart = `
+  CASE
+    WHEN $2 IS NOT NULL AND $3 IS NOT NULL
+    THEN date_trunc('month', make_date($3, $2, 1)) - INTERVAL '5 months'
+    WHEN $3 IS NOT NULL
+    THEN date_trunc('month', make_date($3, 1, 1))
+    WHEN $2 IS NOT NULL
+    THEN date_trunc('month', make_date(EXTRACT(YEAR FROM CURRENT_DATE)::int, $2, 1)) - INTERVAL '5 months'
+    ELSE date_trunc('month', CURRENT_DATE) - INTERVAL '5 months'
+  END
+`;
+
+const dashboardSeriesEnd = `
+  CASE
+    WHEN $2 IS NOT NULL AND $3 IS NOT NULL
+    THEN date_trunc('month', make_date($3, $2, 1))
+    WHEN $3 IS NOT NULL
+    THEN date_trunc('month', make_date($3, 12, 1))
+    WHEN $2 IS NOT NULL
+    THEN date_trunc('month', make_date(EXTRACT(YEAR FROM CURRENT_DATE)::int, $2, 1))
+    ELSE date_trunc('month', CURRENT_DATE)
+  END
+`;
+
+export async function findDashboardByFinca(fincaId, filters = {}) {
+  const { month = null, year = null } = filters;
   const summaryQuery = `
     WITH cultivos AS (
       SELECT c.idcultivo,
@@ -21,6 +50,7 @@ export async function findDashboardByFinca(fincaId) {
     costos AS (
       SELECT idcultivo, SUM(valor) AS total_costos
       FROM costo
+      WHERE ${buildDashboardPeriodCondition('costo', 'fecha')}
       GROUP BY idcultivo
     ),
     ingresos AS (
@@ -28,6 +58,7 @@ export async function findDashboardByFinca(fincaId) {
              SUM(cantidad_cosechada * precio_unitario) AS total_ingresos,
              SUM(cantidad_cosechada) AS total_produccion
       FROM cosecha
+      WHERE ${buildDashboardPeriodCondition('cosecha', 'fecha_cosecha')}
       GROUP BY idcultivo
     )
     SELECT
@@ -58,12 +89,14 @@ export async function findDashboardByFinca(fincaId) {
     costos AS (
       SELECT idcultivo, SUM(valor) AS total_costos
       FROM costo
+      WHERE ${buildDashboardPeriodCondition('costo', 'fecha')}
       GROUP BY idcultivo
     ),
     ingresos AS (
       SELECT idcultivo,
              SUM(cantidad_cosechada * precio_unitario) AS total_ingresos
       FROM cosecha
+      WHERE ${buildDashboardPeriodCondition('cosecha', 'fecha_cosecha')}
       GROUP BY idcultivo
     )
     SELECT
@@ -93,6 +126,7 @@ export async function findDashboardByFinca(fincaId) {
       LEFT JOIN subcategoria_costo sc ON sc.idcategoria = cc.idcategoria
       LEFT JOIN costo co ON co.idsubcategoria = sc.idsubcategoria
       LEFT JOIN cultivo cu ON co.idcultivo = cu.idcultivo AND cu.idfinca = $1
+      WHERE co.idcosto IS NULL OR ${buildDashboardPeriodCondition('co', 'fecha')}
       GROUP BY cc.nombre
       ORDER BY total DESC, cc.nombre;
   `;
@@ -101,8 +135,8 @@ export async function findDashboardByFinca(fincaId) {
     SELECT TO_CHAR(month, 'Mon YYYY') AS label,
            COALESCE(SUM(cc.cantidad_cosechada), 0) AS total_produccion
     FROM GENERATE_SERIES(
-      date_trunc('month', CURRENT_DATE) - INTERVAL '5 months',
-      date_trunc('month', CURRENT_DATE),
+      (${dashboardSeriesStart}),
+      (${dashboardSeriesEnd}),
       INTERVAL '1 month'
     ) AS month
     LEFT JOIN cosecha cc ON date_trunc('month', cc.fecha_cosecha) = month
@@ -115,8 +149,8 @@ export async function findDashboardByFinca(fincaId) {
     SELECT TO_CHAR(month, 'Mon YYYY') AS label,
            COALESCE(SUM(co.valor), 0) AS total_costos
     FROM GENERATE_SERIES(
-      date_trunc('month', CURRENT_DATE) - INTERVAL '5 months',
-      date_trunc('month', CURRENT_DATE),
+      (${dashboardSeriesStart}),
+      (${dashboardSeriesEnd}),
       INTERVAL '1 month'
     ) AS month
     LEFT JOIN costo co ON date_trunc('month', co.fecha) = month
@@ -143,6 +177,7 @@ export async function findDashboardByFinca(fincaId) {
     FROM cosecha cc
     JOIN finca_cultivos fc ON cc.idcultivo = fc.idcultivo
     LEFT JOIN unidades_medidas um ON cc.idunidadmedida = um.idunidadmedida
+    WHERE ${buildDashboardPeriodCondition('cc', 'fecha_cosecha')}
 
     UNION ALL
 
@@ -157,6 +192,7 @@ export async function findDashboardByFinca(fincaId) {
     JOIN finca_cultivos fc ON co.idcultivo = fc.idcultivo
     LEFT JOIN subcategoria_costo sc ON co.idsubcategoria = sc.idsubcategoria
     LEFT JOIN categoria_costo cc ON sc.idcategoria = cc.idcategoria
+    WHERE ${buildDashboardPeriodCondition('co', 'fecha')}
 
     UNION ALL
 
@@ -170,6 +206,7 @@ export async function findDashboardByFinca(fincaId) {
     FROM etapa_cultivo ec
     JOIN finca_cultivos fc ON ec.idcultivo = fc.idcultivo
     LEFT JOIN etapas e ON ec.idetapa = e.idetapa
+    WHERE ${buildDashboardPeriodCondition('ec', 'fecha_inicio')}
 
     UNION ALL
 
@@ -179,6 +216,7 @@ export async function findDashboardByFinca(fincaId) {
            CONCAT('Inicio: ', TO_CHAR(c.fecha_inicio, 'DD/MM/YYYY')) AS description
     FROM cultivo c
     WHERE c.idfinca = $1
+      AND ${buildDashboardPeriodCondition('c', 'fecha_inicio')}
 
     ORDER BY occurred_at DESC
     LIMIT 5;
@@ -257,13 +295,15 @@ export async function findDashboardByFinca(fincaId) {
     LIMIT 1;
   `;
 
+  const queryParams = [fincaId, month, year];
+
   const [summaryResult, rentabilidadResult, categoryResult, productionResult, costTrendResult, recentActivitiesResult, upcomingCropResult, costRiskResult, lowProductionResult, highProfitResult] = await Promise.all([
-    pool.query(summaryQuery, [fincaId]),
-    pool.query(rentabilidadQuery, [fincaId]),
-    pool.query(costCategoryQuery, [fincaId]),
-    pool.query(productionTrendQuery, [fincaId]),
-    pool.query(costTrendQuery, [fincaId]),
-    pool.query(recentActivitiesQuery, [fincaId]),
+    pool.query(summaryQuery, queryParams),
+    pool.query(rentabilidadQuery, queryParams),
+    pool.query(costCategoryQuery, queryParams),
+    pool.query(productionTrendQuery, queryParams),
+    pool.query(costTrendQuery, queryParams),
+    pool.query(recentActivitiesQuery, queryParams),
     pool.query(upcomingCropQuery, [fincaId]),
     pool.query(costRiskQuery, [fincaId]),
     pool.query(lowProductionQuery, [fincaId]),
