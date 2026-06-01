@@ -7,31 +7,37 @@ const toNumber = (value) => {
 };
 
 const buildDashboardPeriodCondition = (alias, dateColumn) => {
-  return `($2 IS NULL OR EXTRACT(MONTH FROM ${alias}.${dateColumn})::int = $2) AND ($3 IS NULL OR EXTRACT(YEAR FROM ${alias}.${dateColumn})::int = $3)`;
+  return `($2::int IS NULL OR EXTRACT(MONTH FROM ${alias}.${dateColumn})::int = $2::int) AND ($3::int IS NULL OR EXTRACT(YEAR FROM ${alias}.${dateColumn})::int = $3::int)`;
 };
 
-const dashboardSeriesStart = `
-  CASE
-    WHEN $2 IS NOT NULL AND $3 IS NOT NULL
-    THEN date_trunc('month', make_date($3, $2, 1)) - INTERVAL '5 months'
-    WHEN $3 IS NOT NULL
-    THEN date_trunc('month', make_date($3, 1, 1))
-    WHEN $2 IS NOT NULL
-    THEN date_trunc('month', make_date(EXTRACT(YEAR FROM CURRENT_DATE)::int, $2, 1)) - INTERVAL '5 months'
-    ELSE date_trunc('month', CURRENT_DATE) - INTERVAL '5 months'
-  END
+const dashboardSeriesStart = (monthAlias, yearAlias) => `
+  CAST(
+    CASE
+      WHEN ${monthAlias} IS NOT NULL AND ${yearAlias} IS NOT NULL
+      THEN date_trunc('month', make_date(${yearAlias}::int, ${monthAlias}::int, 1)) - INTERVAL '5 months'
+      WHEN ${yearAlias} IS NOT NULL
+      THEN date_trunc('month', make_date(${yearAlias}::int, 1, 1))
+      WHEN ${monthAlias} IS NOT NULL
+      THEN date_trunc('month', make_date(EXTRACT(YEAR FROM CURRENT_DATE)::int, ${monthAlias}::int, 1)) - INTERVAL '5 months'
+      ELSE date_trunc('month', CURRENT_DATE) - INTERVAL '5 months'
+    END
+    AS timestamp
+  )
 `;
 
-const dashboardSeriesEnd = `
-  CASE
-    WHEN $2 IS NOT NULL AND $3 IS NOT NULL
-    THEN date_trunc('month', make_date($3, $2, 1))
-    WHEN $3 IS NOT NULL
-    THEN date_trunc('month', make_date($3, 12, 1))
-    WHEN $2 IS NOT NULL
-    THEN date_trunc('month', make_date(EXTRACT(YEAR FROM CURRENT_DATE)::int, $2, 1))
-    ELSE date_trunc('month', CURRENT_DATE)
-  END
+const dashboardSeriesEnd = (monthAlias, yearAlias) => `
+  CAST(
+    CASE
+      WHEN ${monthAlias} IS NOT NULL AND ${yearAlias} IS NOT NULL
+      THEN date_trunc('month', make_date(${yearAlias}::int, ${monthAlias}::int, 1))
+      WHEN ${yearAlias} IS NOT NULL
+      THEN date_trunc('month', make_date(${yearAlias}::int, 12, 1))
+      WHEN ${monthAlias} IS NOT NULL
+      THEN date_trunc('month', make_date(EXTRACT(YEAR FROM CURRENT_DATE)::int, ${monthAlias}::int, 1))
+      ELSE date_trunc('month', CURRENT_DATE)
+    END
+    AS timestamp
+  )
 `;
 
 export async function findDashboardByFinca(fincaId, filters = {}) {
@@ -132,31 +138,35 @@ export async function findDashboardByFinca(fincaId, filters = {}) {
   `;
 
   const productionTrendQuery = `
-    SELECT TO_CHAR(month, 'Mon YYYY') AS label,
+    WITH params AS (SELECT $2::int AS month_num, $3::int AS year_num)
+    SELECT TO_CHAR(generated_month, 'Mon YYYY') AS label,
            COALESCE(SUM(cc.cantidad_cosechada), 0) AS total_produccion
-    FROM GENERATE_SERIES(
-      (${dashboardSeriesStart}),
-      (${dashboardSeriesEnd}),
-      INTERVAL '1 month'
-    ) AS month
-    LEFT JOIN cosecha cc ON date_trunc('month', cc.fecha_cosecha) = month
+    FROM params,
+         GENERATE_SERIES(
+           (${dashboardSeriesStart('params.month_num', 'params.year_num')}),
+           (${dashboardSeriesEnd('params.month_num', 'params.year_num')}),
+           INTERVAL '1 month'
+         ) AS generated_month
+    LEFT JOIN cosecha cc ON date_trunc('month', cc.fecha_cosecha) = generated_month
     LEFT JOIN cultivo cu ON cc.idcultivo = cu.idcultivo AND cu.idfinca = $1
-    GROUP BY month
-    ORDER BY month;
+    GROUP BY generated_month
+    ORDER BY generated_month;
   `;
 
   const costTrendQuery = `
-    SELECT TO_CHAR(month, 'Mon YYYY') AS label,
+    WITH params AS (SELECT $2::int AS month_num, $3::int AS year_num)
+    SELECT TO_CHAR(generated_month, 'Mon YYYY') AS label,
            COALESCE(SUM(co.valor), 0) AS total_costos
-    FROM GENERATE_SERIES(
-      (${dashboardSeriesStart}),
-      (${dashboardSeriesEnd}),
-      INTERVAL '1 month'
-    ) AS month
-    LEFT JOIN costo co ON date_trunc('month', co.fecha) = month
+    FROM params,
+         GENERATE_SERIES(
+           (${dashboardSeriesStart('params.month_num', 'params.year_num')}),
+           (${dashboardSeriesEnd('params.month_num', 'params.year_num')}),
+           INTERVAL '1 month'
+         ) AS generated_month
+    LEFT JOIN costo co ON date_trunc('month', co.fecha) = generated_month
     LEFT JOIN cultivo cu ON co.idcultivo = cu.idcultivo AND cu.idfinca = $1
-    GROUP BY month
-    ORDER BY month;
+    GROUP BY generated_month
+    ORDER BY generated_month;
   `;
 
   const recentActivitiesQuery = `

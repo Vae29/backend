@@ -141,9 +141,12 @@ export async function fetchCultivoDetalleById(idcultivo) {
         co.descripcion,
         co.valor,
         COALESCE(u.primer_nombre || ' ' || u.primer_apellido, '') AS usuario,
+        sc.idsubcategoria AS "subcategoriaId",
         sc.nombre AS subcategoria,
+        cc.idcategoria AS "categoriaId",
         cc.nombre AS categoria,
         et.nombre_etapa AS etapa,
+        ep.idestado_pago AS "estadoPagoId",
         ep.nombre AS estado_pago
       FROM costo co
       LEFT JOIN subcategoria_costo sc ON co.idsubcategoria = sc.idsubcategoria
@@ -219,7 +222,6 @@ export async function finalizeEtapaEnProceso(idcultivo) {
 
 export async function createEtapaParaCultivo({ idcultivo, idetapa, descripcion }) {
   try {
-    // assume 'en proceso' has idestado = 1
     const inProcessId = 1
     const result = await pool.query(
       `INSERT INTO etapa_cultivo (idetapa, idcultivo, descripcion, fecha_inicio, idestado, activo)
@@ -234,7 +236,6 @@ export async function createEtapaParaCultivo({ idcultivo, idetapa, descripcion }
   }
 }
 
-<<<<<<< HEAD
 export async function updateEtapaParaCultivo(
   idetapacultivo,
   { descripcion, idestado },
@@ -296,7 +297,9 @@ export async function updateEtapaParaCultivo(
   } catch (error) {
     console.error('Error updating etapa para cultivo:', error)
     throw error
-=======
+  }
+}
+
 export async function deleteOrDeactivateEtapaById(idetapaCultivo) {
   const client = await pool.connect()
   try {
@@ -335,7 +338,6 @@ export async function deleteOrDeactivateEtapaById(idetapaCultivo) {
     throw error
   } finally {
     client.release()
->>>>>>> origin/isabella
   }
 }
 
@@ -497,7 +499,7 @@ export async function fetchEtapaEnProcesoPorCultivo(idcultivo) {
       `SELECT ec.idetapacultivo, et.nombre_etapa
        FROM etapa_cultivo ec
        LEFT JOIN etapas et ON ec.idetapa = et.idetapa
-       WHERE ec.idcultivo = $1 AND ec.idestado = 1
+       WHERE ec.idcultivo = $1 AND ec.idestado = 1 AND ec.activo = TRUE
        LIMIT 1`,
       [idcultivo]
     );
@@ -534,20 +536,157 @@ export async function validateCultivoCanAddCosto(idcultivo) {
       return { valid: false, reason: 'no_etapas' };
     }
 
-    // Verificar si hay etapa en proceso
+    // Verificar si hay etapa activa en proceso
     const etapaEnProcesoResult = await pool.query(
-      'SELECT COUNT(*) as count FROM etapa_cultivo WHERE idcultivo = $1 AND idestado = 1',
+      'SELECT COUNT(*) as count FROM etapa_cultivo WHERE idcultivo = $1 AND idestado = 1 AND activo = TRUE',
       [idcultivo]
     );
 
     if (etapaEnProcesoResult.rows[0].count === 0) {
-      // No hay etapa en proceso, pero el cultivo sigue pudiendo registrar costos con la etapa más reciente
-      return { valid: true };
+      return { valid: false, reason: 'no_active_etapa_en_proceso' };
     }
 
     return { valid: true };
   } catch (error) {
     console.error('Error validating cultivo for cost:', error);
+    throw error;
+  }
+}
+
+export async function validateCultivoCanAddCosecha(idcultivo) {
+  try {
+    const result = await pool.query(
+      `SELECT ec.idetapacultivo
+       FROM etapa_cultivo ec
+       LEFT JOIN etapas et ON ec.idetapa = et.idetapa
+       WHERE ec.idcultivo = $1
+         AND ec.idestado = 1
+         AND ec.activo = TRUE
+         AND LOWER(et.nombre_etapa) = LOWER('Cosecha')
+       LIMIT 1`,
+      [idcultivo]
+    );
+
+    return result.rows.length > 0 ? result.rows[0] : null;
+  } catch (error) {
+    console.error('Error validating cultivo for cosecha:', error);
+    throw error;
+  }
+}
+
+export async function fetchCosechasPorCultivo(idcultivo) {
+  try {
+    const result = await pool.query(
+      `SELECT
+         c.idcosecha AS id,
+         c.idcultivo,
+         c.fecha_cosecha AS fecha,
+         c.cantidad_cosechada AS cantidad,
+         c.precio_unitario AS precio,
+         c.idunidadmedida AS unidadMedidaId,
+         um.nombre AS unidad,
+         c.idtipoprecio AS tipoPrecioId,
+         tp.nombre AS tipoPrecio
+       FROM cosecha c
+       LEFT JOIN unidades_medidas um ON c.idunidadmedida = um.idunidadmedida
+       LEFT JOIN tipo_precio tp ON c.idtipoprecio = tp.idtipoprecio
+       WHERE c.idcultivo = $1
+       ORDER BY c.fecha_cosecha DESC`,
+      [idcultivo]
+    );
+    return result.rows;
+  } catch (error) {
+    console.error('Error fetching cosechas por cultivo:', error);
+    throw error;
+  }
+}
+
+export async function fetchUnidadesMedida() {
+  try {
+    const result = await pool.query(
+      'SELECT idunidadmedida AS id, nombre FROM unidades_medidas ORDER BY nombre'
+    );
+    return result.rows;
+  } catch (error) {
+    console.error('Error fetching unidades de medida:', error);
+    throw error;
+  }
+}
+
+export async function fetchTiposPrecio() {
+  try {
+    const result = await pool.query(
+      'SELECT idtipoprecio AS id, nombre FROM tipo_precio ORDER BY nombre'
+    );
+    return result.rows;
+  } catch (error) {
+    console.error('Error fetching tipos de precio:', error);
+    throw error;
+  }
+}
+
+export async function createCosecha({ idcultivo, cantidad_cosechada, idunidadmedida, precio_unitario, idtipo_precio }) {
+  try {
+    const result = await pool.query(
+      `INSERT INTO cosecha (idcultivo, cantidad_cosechada, idunidadmedida, precio_unitario, idtipoprecio, fecha_cosecha)
+       VALUES ($1, $2, $3, $4, $5, CURRENT_DATE)
+       RETURNING idcosecha AS id, idcultivo, cantidad_cosechada AS cantidad, idunidadmedida, precio_unitario AS precio, idtipoprecio AS tipoPrecioId, fecha_cosecha AS fecha`,
+      [idcultivo, cantidad_cosechada, idunidadmedida, precio_unitario, idtipo_precio]
+    );
+    return result.rows[0];
+  } catch (error) {
+    console.error('Error creating cosecha:', error);
+    throw error;
+  }
+}
+
+export async function updateCosecha(idcosecha, { cantidad_cosechada, idunidadmedida, precio_unitario, idtipo_precio }) {
+  try {
+    const result = await pool.query(
+      `UPDATE cosecha
+       SET cantidad_cosechada = $1,
+           idunidadmedida = $2,
+           precio_unitario = $3,
+           idtipoprecio = $4
+       WHERE idcosecha = $5
+       RETURNING idcosecha AS id, idcultivo, cantidad_cosechada AS cantidad, idunidadmedida, precio_unitario AS precio, idtipoprecio AS tipoPrecioId, fecha_cosecha AS fecha`,
+      [cantidad_cosechada, idunidadmedida, precio_unitario, idtipo_precio, idcosecha]
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Error updating cosecha:', error);
+    throw error;
+  }
+}
+
+export async function deleteCosechaById(idcosecha) {
+  try {
+    const result = await pool.query(
+      'DELETE FROM cosecha WHERE idcosecha = $1 RETURNING idcosecha AS id',
+      [idcosecha]
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Error deleting cosecha:', error);
+    throw error;
+  }
+}
+
+export async function validateActiveEtapaForCultivo(idetapacultivo, idcultivo) {
+  try {
+    const result = await pool.query(
+      `SELECT 1
+       FROM etapa_cultivo
+       WHERE idetapacultivo = $1
+         AND idcultivo = $2
+         AND idestado = 1
+         AND activo = TRUE
+       LIMIT 1`,
+      [idetapacultivo, idcultivo]
+    );
+    return result.rows.length > 0;
+  } catch (error) {
+    console.error('Error validating active etapa for cultivo:', error);
     throw error;
   }
 }
@@ -563,6 +702,38 @@ export async function createCosto({ descripcion, valor, idcultivo, idetapa_culti
     return result.rows[0];
   } catch (error) {
     console.error('Error creating costo:', error);
+    throw error;
+  }
+}
+
+export async function updateCosto(idcosto, { descripcion, valor, idsubcategoria, idestado_pago }) {
+  try {
+    const result = await pool.query(
+      `UPDATE costo
+       SET descripcion = $1,
+           valor = $2,
+           idsubcategoria = $3,
+           idestado_pago = $4
+       WHERE idcosto = $5
+       RETURNING idcosto AS id, descripcion, valor, fecha, idcultivo, idetapa_cultivo AS etapaCultivoId, idsubcategoria, idestado_pago`,
+      [descripcion || null, valor, idsubcategoria, idestado_pago, idcosto]
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Error updating costo:', error);
+    throw error;
+  }
+}
+
+export async function deleteCostoById(idcosto) {
+  try {
+    const result = await pool.query(
+      'DELETE FROM costo WHERE idcosto = $1 RETURNING idcosto AS id',
+      [idcosto]
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Error deleting costo:', error);
     throw error;
   }
 }

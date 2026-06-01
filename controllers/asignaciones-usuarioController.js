@@ -1,11 +1,4 @@
-<<<<<<< HEAD
-import { fetchAllFincas, fetchCultivosEnProceso, fetchCultivosPorFinca, fetchCultivoDetalleById, fetchCategoriasCosto, fetchSubcategoriasPorCategoria, fetchEstadosPago, fetchEtapaEnProcesoPorCultivo, validateCultivoCanAddCosto, createCosto, fetchTiposCultivo, fetchEstados, fetchEstadoById, createCultivo, updateCultivo, fetchCultivosPorUsuario, fetchFincasPorUsuario } from '../models/asinaciones-usuarioModel.js';
-import { fetchEtapasPorCultivo, fetchAllEtapasCatalog, finalizeEtapaEnProceso, createEtapaParaCultivo, updateEtapaParaCultivo } from '../models/asinaciones-usuarioModel.js';
-=======
-import { fetchAllFincas, fetchCultivosEnProceso, fetchCultivosPorFinca, fetchCultivoDetalleById, fetchCategoriasCosto, fetchSubcategoriasPorCategoria, fetchEstadosPago, fetchEtapaEnProcesoPorCultivo, validateCultivoCanAddCosto, createCosto, fetchTiposCultivo, fetchEstados, fetchEstadoById, createCultivo, updateCultivo, fetchCultivosPorUsuario, fetchFincasPorUsuario, deleteOrDeactivateEtapaById } from '../models/asinaciones-usuarioModel.js';
-import { fetchEtapasPorCultivo, fetchAllEtapasCatalog, finalizeEtapaEnProceso, createEtapaParaCultivo } from '../models/asinaciones-usuarioModel.js';
->>>>>>> origin/isabella
-import { deleteCultivoById } from '../models/asinaciones-usuarioModel.js';
+﻿import { fetchAllFincas, fetchCultivosEnProceso, fetchCultivosPorFinca, fetchCultivoDetalleById, fetchCategoriasCosto, fetchSubcategoriasPorCategoria, fetchEstadosPago, fetchEtapaEnProcesoPorCultivo, validateCultivoCanAddCosto, validateActiveEtapaForCultivo, createCosto, updateCosto, deleteCostoById, fetchTiposCultivo, fetchEstados, fetchEstadoById, createCultivo, updateCultivo, fetchCultivosPorUsuario, fetchFincasPorUsuario, deleteOrDeactivateEtapaById, deleteCultivoById, fetchEtapasPorCultivo, fetchAllEtapasCatalog, finalizeEtapaEnProceso, createEtapaParaCultivo, updateEtapaParaCultivo, fetchCosechasPorCultivo, fetchUnidadesMedida, fetchTiposPrecio, validateCultivoCanAddCosecha, createCosecha, updateCosecha, deleteCosechaById } from '../models/asinaciones-usuarioModel.js';
 
 export async function getFincas(req, res) {
   try {
@@ -59,7 +52,7 @@ export async function getCultivosPorFinca(req, res) {
     if (!fincaId || isNaN(fincaId)) {
       return res.status(400).json({
         success: false,
-        message: 'ID de finca inválido',
+        message: 'ID de finca invÃ¡lido',
       });
     }
     const cultivos = await fetchCultivosPorFinca(Number(fincaId));
@@ -98,7 +91,7 @@ export async function postCultivo(req, res) {
     if (!nombre || !idtipocultivo || !idfinca) {
       return res.status(400).json({
         success: false,
-        message: 'Información incompleta para crear el cultivo',
+        message: 'InformaciÃ³n incompleta para crear el cultivo',
       });
     }
 
@@ -138,7 +131,7 @@ export async function getCultivoDetalle(req, res) {
     if (!cultivoId || Number.isNaN(cultivoId)) {
       return res.status(400).json({
         success: false,
-        message: 'ID de cultivo inválido',
+        message: 'ID de cultivo invÃ¡lido',
       });
     }
 
@@ -167,7 +160,7 @@ export async function getCategoriasCosto(req, res) {
     console.error('Error en getCategoriasCosto:', error);
     res.status(500).json({
       success: false,
-      message: 'Error al obtener categorías de costo',
+      message: 'Error al obtener categorÃ­as de costo',
     });
   }
 }
@@ -179,7 +172,7 @@ export async function getSubcategoriasPorCategoria(req, res) {
     if (!idcategoria || Number.isNaN(idcategoria)) {
       return res.status(400).json({
         success: false,
-        message: 'ID de categoría inválido',
+        message: 'ID de categorÃ­a invÃ¡lido',
       });
     }
 
@@ -192,7 +185,7 @@ export async function getSubcategoriasPorCategoria(req, res) {
     console.error('Error en getSubcategoriasPorCategoria:', error);
     res.status(500).json({
       success: false,
-      message: 'Error al obtener subcategorías',
+      message: 'Error al obtener subcategorÃ­as',
     });
   }
 }
@@ -220,7 +213,7 @@ export async function getEtapaEnProcesoPorCultivo(req, res) {
     if (!idcultivo || Number.isNaN(idcultivo)) {
       return res.status(400).json({
         success: false,
-        message: 'ID de cultivo inválido',
+        message: 'ID de cultivo invÃ¡lido',
       });
     }
 
@@ -252,6 +245,146 @@ export async function getEtapasPorCultivo(req, res) {
   }
 }
 
+export async function getCosechasPorCultivo(req, res) {
+  try {
+    const cultivoId = Number(req.params.cultivoId)
+    if (!cultivoId || Number.isNaN(cultivoId)) {
+      return res.status(400).json({ success: false, message: 'ID de cultivo inválido' })
+    }
+    const data = await fetchCosechasPorCultivo(cultivoId)
+    res.json({ success: true, data })
+  } catch (error) {
+    console.error('Error en getCosechasPorCultivo:', error)
+    res.status(500).json({ success: false, message: 'Error al obtener cosechas del cultivo' })
+  }
+}
+
+export async function getUnidadesMedida(req, res) {
+  try {
+    const data = await fetchUnidadesMedida()
+    res.json({ success: true, data })
+  } catch (error) {
+    console.error('Error en getUnidadesMedida:', error)
+    res.status(500).json({ success: false, message: 'Error al obtener unidades de medida' })
+  }
+}
+
+export async function getTiposPrecio(req, res) {
+  try {
+    const data = await fetchTiposPrecio()
+    res.json({ success: true, data })
+  } catch (error) {
+    console.error('Error en getTiposPrecio:', error)
+    res.status(500).json({ success: false, message: 'Error al obtener tipos de precio' })
+  }
+}
+
+export async function postCosecha(req, res) {
+  try {
+    const cultivoId = Number(req.params.cultivoId)
+    const cantidad = Number(req.body.cantidad)
+    const idunidadmedida = Number(req.body.idunidadmedida)
+    const precio = Number(req.body.precio)
+    const idtipo_precio = Number(req.body.idtipo_precio)
+
+    const missing = []
+    if (!Number.isFinite(cantidad) || cantidad < 0) missing.push('cantidad')
+    if (!Number.isFinite(idunidadmedida) || idunidadmedida <= 0) missing.push('idunidadmedida')
+    if (!Number.isFinite(precio) || precio < 0) missing.push('precio')
+    if (!Number.isFinite(idtipo_precio) || idtipo_precio <= 0) missing.push('idtipo_precio')
+    if (!Number.isFinite(cultivoId) || cultivoId <= 0) missing.push('cultivoId')
+
+    if (missing.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Información incompleta o inválida para crear la cosecha',
+        missing,
+      })
+    }
+
+    const etapaActiva = await validateCultivoCanAddCosecha(cultivoId)
+    if (!etapaActiva) {
+      return res.status(400).json({
+        success: false,
+        message: 'No es posible registrar una cosecha debido a que el cultivo no se encuentra actualmente en etapa de cosecha activa.',
+      })
+    }
+
+    const cosecha = await createCosecha({
+      idcultivo: cultivoId,
+      cantidad_cosechada: cantidad,
+      idunidadmedida,
+      precio_unitario: precio,
+      idtipo_precio,
+    })
+
+    res.status(201).json({ success: true, data: cosecha })
+  } catch (error) {
+    console.error('Error en postCosecha:', error)
+    res.status(500).json({ success: false, message: 'Error al crear la cosecha' })
+  }
+}
+
+export async function putCosecha(req, res) {
+  try {
+    const id = Number(req.params.id)
+    const cantidad = Number(req.body.cantidad)
+    const idunidadmedida = Number(req.body.idunidadmedida)
+    const precio = Number(req.body.precio)
+    const idtipo_precio = Number(req.body.idtipo_precio)
+
+    const missing = []
+    if (!id || Number.isNaN(id)) missing.push('id')
+    if (!Number.isFinite(cantidad) || cantidad < 0) missing.push('cantidad')
+    if (!Number.isFinite(idunidadmedida) || idunidadmedida <= 0) missing.push('idunidadmedida')
+    if (!Number.isFinite(precio) || precio < 0) missing.push('precio')
+    if (!Number.isFinite(idtipo_precio) || idtipo_precio <= 0) missing.push('idtipo_precio')
+
+    if (missing.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Información incompleta o inválida para actualizar la cosecha',
+        missing,
+      })
+    }
+
+    const updated = await updateCosecha(id, {
+      cantidad_cosechada: cantidad,
+      idunidadmedida,
+      precio_unitario: precio,
+      idtipo_precio,
+    })
+
+    if (!updated) {
+      return res.status(404).json({ success: false, message: 'Cosecha no encontrada' })
+    }
+
+    res.json({ success: true, data: updated })
+  } catch (error) {
+    console.error('Error en putCosecha:', error)
+    res.status(500).json({ success: false, message: 'Error al actualizar la cosecha' })
+  }
+}
+
+export async function deleteCosecha(req, res) {
+  try {
+    const id = Number(req.params.id)
+    if (!id || Number.isNaN(id)) {
+      return res.status(400).json({ success: false, message: 'ID de cosecha inválido' })
+    }
+
+    const deleted = await deleteCosechaById(id)
+    if (!deleted) {
+      return res.status(404).json({ success: false, message: 'Cosecha no encontrada' })
+    }
+
+    res.json({ success: true, data: deleted })
+  } catch (error) {
+    console.error('Error en deleteCosecha:', error)
+    res.status(500).json({ success: false, message: 'Error al eliminar la cosecha' })
+  }
+}
+
 export async function getCultivosPorUsuario(req, res) {
   try {
     const userId = req.user?.id
@@ -275,7 +408,7 @@ export async function getEtapasCatalog(req, res) {
     res.json({ success: true, data })
   } catch (error) {
     console.error('Error en getEtapasCatalog:', error)
-    res.status(500).json({ success: false, message: 'Error al obtener catálogo de etapas' })
+    res.status(500).json({ success: false, message: 'Error al obtener catÃ¡logo de etapas' })
   }
 }
 
@@ -283,20 +416,18 @@ export async function postEtapaPorCultivo(req, res) {
   try {
     const cultivoId = Number(req.params.cultivoId)
     if (!cultivoId || Number.isNaN(cultivoId)) {
-      return res.status(400).json({ success: false, message: 'ID de cultivo inválido' })
+      return res.status(400).json({ success: false, message: 'ID de cultivo invÃ¡lido' })
     }
     const { idetapa, descripcion, forceFinalize } = req.body
     if (!idetapa) {
       return res.status(400).json({ success: false, message: 'ID de etapa requerido' })
     }
 
-    // If requested, finalize existing in-process etapa(s)
     let finalized = []
     if (forceFinalize) {
       finalized = await finalizeEtapaEnProceso(cultivoId)
     }
 
-    // Create new etapa as 'En Proceso'
     const created = await createEtapaParaCultivo({ idcultivo: cultivoId, idetapa, descripcion })
 
     res.status(201).json({ success: true, data: { finalized, created } })
@@ -306,12 +437,11 @@ export async function postEtapaPorCultivo(req, res) {
   }
 }
 
-<<<<<<< HEAD
 export async function putEtapaPorCultivo(req, res) {
   try {
     const etapaId = Number(req.params.id)
     if (!etapaId || Number.isNaN(etapaId)) {
-      return res.status(400).json({ success: false, message: 'ID de etapa inválido' })
+      return res.status(400).json({ success: false, message: 'ID de etapa invÃ¡lido' })
     }
 
     const { descripcion, idestado, forceFinalize, forceEnProceso } = req.body
@@ -335,12 +465,14 @@ export async function putEtapaPorCultivo(req, res) {
   } catch (error) {
     console.error('Error en putEtapaPorCultivo:', error)
     res.status(500).json({ success: false, message: 'Error al actualizar etapa del cultivo' })
-=======
+  }
+}
+
 export async function deleteEtapaPorCultivo(req, res) {
   try {
     const etapaCultivoId = Number(req.params.etapaCultivoId)
     if (!etapaCultivoId || Number.isNaN(etapaCultivoId)) {
-      return res.status(400).json({ success: false, message: 'ID de etapa inválido' })
+      return res.status(400).json({ success: false, message: 'ID de etapa invÃ¡lido' })
     }
 
     const result = await deleteOrDeactivateEtapaById(etapaCultivoId)
@@ -364,7 +496,6 @@ export async function deleteEtapaPorCultivo(req, res) {
   } catch (error) {
     console.error('Error en deleteEtapaPorCultivo:', error)
     res.status(500).json({ success: false, message: 'Error al eliminar la etapa' })
->>>>>>> origin/isabella
   }
 }
 
@@ -375,7 +506,7 @@ export async function validateCultivoForCost(req, res) {
     if (!idcultivo || Number.isNaN(idcultivo)) {
       return res.status(400).json({
         success: false,
-        message: 'ID de cultivo inválido',
+        message: 'ID de cultivo invÃ¡lido',
       });
     }
 
@@ -395,75 +526,24 @@ export async function validateCultivoForCost(req, res) {
 
 export async function postCosto(req, res) {
   try {
-<<<<<<< HEAD
     const descripcion = req.body.descripcion?.trim() || null
-    const valor = Number(req.body.valor)
-    const idcultivo = Number(req.body.idcultivo)
-    const idetapa_cultivo = Number(req.body.idetapa_cultivo)
-    const idusuario = Number(req.user?.id ?? req.body.idusuario)
-    const idsubcategoria = Number(req.body.idsubcategoria)
-    const idfinca = Number(req.body.idfinca)
-    const idestado_pago = Number(req.body.idestado_pago)
+    const parsedValor = Number(req.body.valor)
+    const parsedIdcultivo = Number(req.body.idcultivo)
+    const rawIdetapaCultivo = req.body.idetapa_cultivo
+    const parsedIdetapaCultivo = Number(rawIdetapaCultivo)
+    const idetapa_cultivo = Number.isNaN(parsedIdetapaCultivo) || parsedIdetapaCultivo <= 0 ? null : parsedIdetapaCultivo
+    const parsedIdusuario = Number(req.user?.id ?? req.body.idusuario)
+    const parsedIdsubcategoria = Number(req.body.idsubcategoria)
+    const parsedIdfinca = Number(req.body.idfinca)
+    const parsedIdestadoPago = Number(req.body.idestado_pago)
 
-    if (Number.isNaN(valor) || valor <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'El valor del costo debe ser un número mayor a 0',
-      })
-    }
-
-    if (Number.isNaN(idcultivo) || idcultivo <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'ID de cultivo inválido',
-      })
-    }
-
-    if (Number.isNaN(idusuario) || idusuario <= 0) {
-      return res.status(401).json({
-        success: false,
-        message: 'Usuario no autenticado o inválido',
-      })
-    }
-
-    if (Number.isNaN(idsubcategoria) || idsubcategoria <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'ID de subcategoría inválido',
-      })
-    }
-
-    if (Number.isNaN(idfinca) || idfinca <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'ID de finca inválido',
-      })
-    }
-
-    if (Number.isNaN(idestado_pago) || idestado_pago <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'ID de estado de pago inválido',
-      })
-=======
-    console.log('[DEBUG postCosto] req.body:', req.body);
-    const { descripcion, valor, idcultivo, idetapa_cultivo, idusuario, idsubcategoria, idfinca, idestado_pago } = req.body;
-
-    // Parse numeric inputs robustly to avoid falsy checks failing (e.g., valor === 0)
-    const parsedValor = Number(valor);
-    const parsedIdcultivo = Number(idcultivo);
-    const parsedIdusuario = Number(idusuario);
-    const parsedIdsubcategoria = Number(req.body.idsubcategoria ?? idsubcategoria);
-    const parsedIdfinca = Number(idfinca);
-    const parsedIdestadoPago = Number(idestado_pago);
-
-    const missing = [];
-    if (!Number.isFinite(parsedValor) || parsedValor <= 0) missing.push('valor');
-    if (!Number.isFinite(parsedIdcultivo) || parsedIdcultivo <= 0) missing.push('idcultivo');
-    if (!Number.isFinite(parsedIdusuario) || parsedIdusuario <= 0) missing.push('idusuario');
-    if (!Number.isFinite(parsedIdsubcategoria) || parsedIdsubcategoria <= 0) missing.push('idsubcategoria');
-    if (!Number.isFinite(parsedIdfinca) || parsedIdfinca <= 0) missing.push('idfinca');
-    if (!Number.isFinite(parsedIdestadoPago) || parsedIdestadoPago <= 0) missing.push('idestado_pago');
+    const missing = []
+    if (!Number.isFinite(parsedValor) || parsedValor <= 0) missing.push('valor')
+    if (!Number.isFinite(parsedIdcultivo) || parsedIdcultivo <= 0) missing.push('idcultivo')
+    if (!Number.isFinite(parsedIdusuario) || parsedIdusuario <= 0) missing.push('idusuario')
+    if (!Number.isFinite(parsedIdsubcategoria) || parsedIdsubcategoria <= 0) missing.push('idsubcategoria')
+    if (!Number.isFinite(parsedIdfinca) || parsedIdfinca <= 0) missing.push('idfinca')
+    if (!Number.isFinite(parsedIdestadoPago) || parsedIdestadoPago <= 0) missing.push('idestado_pago')
 
     if (missing.length > 0) {
       return res.status(400).json({
@@ -471,23 +551,26 @@ export async function postCosto(req, res) {
         message: 'Información incompleta o inválida para crear el costo',
         missing,
         received: req.body,
-      });
->>>>>>> origin/isabella
+      })
+    }
+
+    if (!idetapa_cultivo) {
+      return res.status(400).json({
+        success: false,
+        message: 'No puede registrar el costo porque el cultivo no tiene una etapa activa en proceso con activo:true.',
+      })
+    }
+
+    const etapaResult = await validateActiveEtapaForCultivo(parsedIdetapaCultivo, parsedIdcultivo)
+    if (!etapaResult) {
+      return res.status(400).json({
+        success: false,
+        message: 'No puede registrar el costo porque la etapa seleccionada no es una etapa activa en proceso con activo:true.',
+      })
     }
 
     const costo = await createCosto({
       descripcion,
-<<<<<<< HEAD
-      valor,
-      idcultivo,
-      idetapa_cultivo: Number.isNaN(idetapa_cultivo) ? null : idetapa_cultivo,
-      idusuario,
-      idsubcategoria,
-      idfinca,
-      idestado_pago,
-    })
-
-=======
       valor: parsedValor,
       idcultivo: parsedIdcultivo,
       idetapa_cultivo,
@@ -495,8 +578,8 @@ export async function postCosto(req, res) {
       idsubcategoria: parsedIdsubcategoria,
       idfinca: parsedIdfinca,
       idestado_pago: parsedIdestadoPago,
-    });
->>>>>>> origin/isabella
+    })
+
     res.status(201).json({
       success: true,
       data: costo,
@@ -516,12 +599,85 @@ export async function postCosto(req, res) {
   }
 }
 
+export async function putCosto(req, res) {
+  try {
+    const { id } = req.params
+    const idcosto = Number(id)
+    if (!idcosto || Number.isNaN(idcosto)) {
+      return res.status(400).json({ success: false, message: 'ID de costo inválido' })
+    }
+
+    const descripcion = req.body.descripcion?.trim() || null
+    const parsedValor = Number(req.body.valor)
+    const parsedIdsubcategoria = Number(req.body.idsubcategoria)
+    const parsedIdestadoPago = Number(req.body.idestado_pago)
+
+    const missing = []
+    if (!Number.isFinite(parsedValor) || parsedValor <= 0) missing.push('valor')
+    if (!Number.isFinite(parsedIdsubcategoria) || parsedIdsubcategoria <= 0) missing.push('idsubcategoria')
+    if (!Number.isFinite(parsedIdestadoPago) || parsedIdestadoPago <= 0) missing.push('idestado_pago')
+
+    if (missing.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Información incompleta o inválida para actualizar el costo',
+        missing,
+      })
+    }
+
+    const updatedCosto = await updateCosto(idcosto, {
+      descripcion,
+      valor: parsedValor,
+      idsubcategoria: parsedIdsubcategoria,
+      idestado_pago: parsedIdestadoPago,
+    })
+
+    if (!updatedCosto) {
+      return res.status(404).json({ success: false, message: 'Costo no encontrado' })
+    }
+
+    res.json({ success: true, data: updatedCosto })
+  } catch (error) {
+    console.error('Error en putCosto:', error)
+    if (error?.code === '23503') {
+      return res.status(400).json({
+        success: false,
+        message: error.detail || 'Referencia inválida al actualizar el costo',
+      })
+    }
+    res.status(500).json({
+      success: false,
+      message: 'Error al actualizar el costo',
+    })
+  }
+}
+
+export async function deleteCosto(req, res) {
+  try {
+    const { id } = req.params
+    const idcosto = Number(id)
+    if (!idcosto || Number.isNaN(idcosto)) {
+      return res.status(400).json({ success: false, message: 'ID de costo inválido' })
+    }
+
+    const deleted = await deleteCostoById(idcosto)
+    if (!deleted) {
+      return res.status(404).json({ success: false, message: 'Costo no encontrado' })
+    }
+
+    res.json({ success: true, data: deleted })
+  } catch (error) {
+    console.error('Error en deleteCosto:', error)
+    res.status(500).json({ success: false, message: 'Error al eliminar el costo' })
+  }
+}
+
 export async function putCultivo(req, res) {
   try {
     const { id } = req.params;
     const cultivoId = Number(id);
     if (!cultivoId || isNaN(cultivoId)) {
-      return res.status(400).json({ success: false, message: 'ID de cultivo inválido' });
+      return res.status(400).json({ success: false, message: 'ID de cultivo invÃ¡lido' });
     }
 
     const { nombre, idtipocultivo, idestado, fecha_inicio } = req.body;
@@ -555,7 +711,7 @@ export async function deleteCultivo(req, res) {
     const { id } = req.params;
     const cultivoId = Number(id);
     if (!cultivoId || isNaN(cultivoId)) {
-      return res.status(400).json({ success: false, message: 'ID de cultivo inválido' });
+      return res.status(400).json({ success: false, message: 'ID de cultivo invÃ¡lido' });
     }
 
     const deleted = await deleteCultivoById(cultivoId);
@@ -569,3 +725,4 @@ export async function deleteCultivo(req, res) {
     res.status(500).json({ success: false, message: 'Error al eliminar cultivo' });
   }
 }
+
