@@ -166,6 +166,39 @@ export async function fetchCultivoDetalleById(idcultivo) {
   }
 }
 
+export async function fetchCostosPorFinca(idfinca) {
+  try {
+    const result = await pool.query(
+      `SELECT
+        co.idcosto AS id,
+        co.fecha,
+        co.descripcion,
+        co.valor,
+        COALESCE(u.primer_nombre || ' ' || u.primer_apellido, '') AS usuario,
+        sc.idsubcategoria AS "subcategoriaId",
+        sc.nombre AS subcategoria,
+        cc.idcategoria AS "categoriaId",
+        cc.nombre AS categoria,
+        cu.nombre AS cultivo,
+        ep.idestado_pago AS "estadoPagoId",
+        ep.nombre AS estado_pago
+      FROM costo co
+      LEFT JOIN usuario u ON co.id_usuario = u.id_usuario
+      LEFT JOIN subcategoria_costo sc ON co.idsubcategoria = sc.idsubcategoria
+      LEFT JOIN categoria_costo cc ON sc.idcategoria = cc.idcategoria
+      LEFT JOIN cultivo cu ON co.idcultivo = cu.idcultivo
+      LEFT JOIN estado_pago ep ON co.idestado_pago = ep.idestado_pago
+      WHERE co.idfinca = $1
+      ORDER BY co.fecha DESC`,
+      [idfinca]
+    );
+    return result.rows;
+  } catch (error) {
+    console.error('Error fetching costos por finca:', error);
+    throw error;
+  }
+}
+
 export async function fetchEtapasPorCultivo(idcultivo) {
   try {
     const result = await pool.query(

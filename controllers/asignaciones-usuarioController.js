@@ -1,4 +1,5 @@
-﻿import { fetchAllFincas, fetchCultivosEnProceso, fetchCultivosPorFinca, fetchCultivoDetalleById, fetchCategoriasCosto, fetchSubcategoriasPorCategoria, fetchEstadosPago, fetchEtapaEnProcesoPorCultivo, validateCultivoCanAddCosto, validateActiveEtapaForCultivo, createCosto, updateCosto, deleteCostoById, fetchTiposCultivo, fetchEstados, fetchEstadoById, createCultivo, updateCultivo, fetchCultivosPorUsuario, fetchFincasPorUsuario, deleteOrDeactivateEtapaById, deleteCultivoById, fetchEtapasPorCultivo, fetchAllEtapasCatalog, finalizeEtapaEnProceso, createEtapaParaCultivo, updateEtapaParaCultivo, fetchCosechasPorCultivo, fetchUnidadesMedida, fetchTiposPrecio, validateCultivoCanAddCosecha, createCosecha, updateCosecha, deleteCosechaById } from '../models/asinaciones-usuarioModel.js';
+﻿import { fetchAllFincas, fetchCultivosEnProceso, fetchCultivosPorFinca, fetchCultivoDetalleById, fetchCostosPorFinca, fetchCategoriasCosto, fetchSubcategoriasPorCategoria, fetchEstadosPago, fetchEtapaEnProcesoPorCultivo, validateCultivoCanAddCosto, validateActiveEtapaForCultivo, createCosto, updateCosto, deleteCostoById, fetchTiposCultivo, fetchEstados, fetchEstadoById, createCultivo, updateCultivo, fetchCultivosPorUsuario, fetchFincasPorUsuario, deleteOrDeactivateEtapaById, deleteCultivoById, fetchEtapasPorCultivo, fetchAllEtapasCatalog, finalizeEtapaEnProceso, createEtapaParaCultivo, updateEtapaParaCultivo, fetchCosechasPorCultivo, fetchUnidadesMedida, fetchTiposPrecio, validateCultivoCanAddCosecha, createCosecha, updateCosecha, deleteCosechaById } from '../models/asinaciones-usuarioModel.js';
+import { parseCurrencyValue } from '../utils/currency.js'
 
 export async function getFincas(req, res) {
   try {
@@ -149,6 +150,30 @@ export async function getCultivoDetalle(req, res) {
   }
 }
 
+export async function getCostosPorFinca(req, res) {
+  try {
+    const fincaId = Number(req.params.fincaId);
+    if (!fincaId || Number.isNaN(fincaId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'ID de finca invÃ¡lido',
+      });
+    }
+
+    const costos = await fetchCostosPorFinca(fincaId);
+    res.json({
+      success: true,
+      data: costos,
+    });
+  } catch (error) {
+    console.error('Error en getCostosPorFinca:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al obtener los costos de la finca',
+    });
+  }
+}
+
 export async function getCategoriasCosto(req, res) {
   try {
     const data = await fetchCategoriasCosto();
@@ -282,9 +307,9 @@ export async function getTiposPrecio(req, res) {
 export async function postCosecha(req, res) {
   try {
     const cultivoId = Number(req.params.cultivoId)
-    const cantidad = Number(req.body.cantidad)
+    const cantidad = parseCurrencyValue(req.body.cantidad)
     const idunidadmedida = Number(req.body.idunidadmedida)
-    const precio = Number(req.body.precio)
+    const precio = parseCurrencyValue(req.body.precio)
     const idtipo_precio = Number(req.body.idtipo_precio)
 
     const missing = []
@@ -328,9 +353,9 @@ export async function postCosecha(req, res) {
 export async function putCosecha(req, res) {
   try {
     const id = Number(req.params.id)
-    const cantidad = Number(req.body.cantidad)
+    const cantidad = parseCurrencyValue(req.body.cantidad)
     const idunidadmedida = Number(req.body.idunidadmedida)
-    const precio = Number(req.body.precio)
+    const precio = parseCurrencyValue(req.body.precio)
     const idtipo_precio = Number(req.body.idtipo_precio)
 
     const missing = []
@@ -527,11 +552,12 @@ export async function validateCultivoForCost(req, res) {
 export async function postCosto(req, res) {
   try {
     const descripcion = req.body.descripcion?.trim() || null
-    const parsedValor = Number(req.body.valor)
-    const parsedIdcultivo = Number(req.body.idcultivo)
+    const parsedValor = parseCurrencyValue(req.body.valor)
+    const rawIdcultivo = req.body.idcultivo
+    const parsedIdcultivo = rawIdcultivo == null || rawIdcultivo === '' ? null : Number(rawIdcultivo)
     const rawIdetapaCultivo = req.body.idetapa_cultivo
-    const parsedIdetapaCultivo = Number(rawIdetapaCultivo)
-    const idetapa_cultivo = Number.isNaN(parsedIdetapaCultivo) || parsedIdetapaCultivo <= 0 ? null : parsedIdetapaCultivo
+    const parsedIdetapaCultivo = rawIdetapaCultivo == null || rawIdetapaCultivo === '' ? null : Number(rawIdetapaCultivo)
+    const idetapa_cultivo = parsedIdetapaCultivo == null || Number.isNaN(parsedIdetapaCultivo) || parsedIdetapaCultivo <= 0 ? null : parsedIdetapaCultivo
     const parsedIdusuario = Number(req.user?.id ?? req.body.idusuario)
     const parsedIdsubcategoria = Number(req.body.idsubcategoria)
     const parsedIdfinca = Number(req.body.idfinca)
@@ -539,11 +565,12 @@ export async function postCosto(req, res) {
 
     const missing = []
     if (!Number.isFinite(parsedValor) || parsedValor <= 0) missing.push('valor')
-    if (!Number.isFinite(parsedIdcultivo) || parsedIdcultivo <= 0) missing.push('idcultivo')
+    if (parsedIdcultivo !== null && (!Number.isFinite(parsedIdcultivo) || parsedIdcultivo <= 0)) missing.push('idcultivo')
     if (!Number.isFinite(parsedIdusuario) || parsedIdusuario <= 0) missing.push('idusuario')
     if (!Number.isFinite(parsedIdsubcategoria) || parsedIdsubcategoria <= 0) missing.push('idsubcategoria')
     if (!Number.isFinite(parsedIdfinca) || parsedIdfinca <= 0) missing.push('idfinca')
     if (!Number.isFinite(parsedIdestadoPago) || parsedIdestadoPago <= 0) missing.push('idestado_pago')
+    if (idetapa_cultivo !== null && parsedIdcultivo === null) missing.push('idcultivo')
 
     if (missing.length > 0) {
       return res.status(400).json({
@@ -554,19 +581,21 @@ export async function postCosto(req, res) {
       })
     }
 
-    if (!idetapa_cultivo) {
+    if (parsedIdcultivo !== null && !idetapa_cultivo) {
       return res.status(400).json({
         success: false,
         message: 'No puede registrar el costo porque el cultivo no tiene una etapa activa en proceso con activo:true.',
       })
     }
 
-    const etapaResult = await validateActiveEtapaForCultivo(parsedIdetapaCultivo, parsedIdcultivo)
-    if (!etapaResult) {
-      return res.status(400).json({
-        success: false,
-        message: 'No puede registrar el costo porque la etapa seleccionada no es una etapa activa en proceso con activo:true.',
-      })
+    if (idetapa_cultivo !== null) {
+      const etapaResult = await validateActiveEtapaForCultivo(parsedIdetapaCultivo, parsedIdcultivo)
+      if (!etapaResult) {
+        return res.status(400).json({
+          success: false,
+          message: 'No puede registrar el costo porque la etapa seleccionada no es una etapa activa en proceso con activo:true.',
+        })
+      }
     }
 
     const costo = await createCosto({
@@ -608,7 +637,7 @@ export async function putCosto(req, res) {
     }
 
     const descripcion = req.body.descripcion?.trim() || null
-    const parsedValor = Number(req.body.valor)
+    const parsedValor = parseCurrencyValue(req.body.valor)
     const parsedIdsubcategoria = Number(req.body.idsubcategoria)
     const parsedIdestadoPago = Number(req.body.idestado_pago)
 
