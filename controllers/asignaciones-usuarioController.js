@@ -469,10 +469,11 @@ export async function putEtapaPorCultivo(req, res) {
       return res.status(400).json({ success: false, message: 'ID de etapa invÃ¡lido' })
     }
 
-    const { descripcion, idestado, forceFinalize, forceEnProceso } = req.body
+    const { idetapa, descripcion, idestado, forceFinalize, forceEnProceso } = req.body
     const updated = await updateEtapaParaCultivo(
       etapaId,
       {
+        idetapa: idetapa !== undefined ? Number(idetapa) : undefined,
         descripcion: descripcion !== undefined ? descripcion : undefined,
         idestado: idestado !== undefined ? Number(idestado) : undefined,
       },

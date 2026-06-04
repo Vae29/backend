@@ -271,7 +271,7 @@ export async function createEtapaParaCultivo({ idcultivo, idetapa, descripcion }
 
 export async function updateEtapaParaCultivo(
   idetapacultivo,
-  { descripcion, idestado },
+  { idetapa, descripcion, idestado },
   { forceFinalize = false, forceEnProceso = false } = {}
 ) {
   try {
@@ -301,6 +301,11 @@ export async function updateEtapaParaCultivo(
     const setClauses = []
     const values = []
     let paramIndex = 1
+
+    if (idetapa !== undefined) {
+      setClauses.push(`idetapa = $${paramIndex++}`)
+      values.push(idetapa)
+    }
 
     if (descripcion !== undefined) {
       setClauses.push(`descripcion = $${paramIndex++}`)
