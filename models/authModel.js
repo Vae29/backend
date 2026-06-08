@@ -2,21 +2,21 @@ import pool from '../config/db.js';
 
 export async function findUserByCredentials(email, password) {
   const result = await pool.query(
-    'SELECT id_usuario AS id, correo AS email, primer_nombre AS nombre, primer_apellido AS apellidos, id_roles AS rol FROM usuario WHERE correo = $1 AND "contraseña" = $2 AND activo = TRUE',
-    [email.toLowerCase().trim(), password]
+    'SELECT id_usuario AS id, correo AS email, primer_nombre AS nombre, primer_apellido AS apellidos, id_roles AS rol FROM usuario WHERE correo = $1 AND "contraseña" = $2 AND estado_registro = $3',
+    [email.toLowerCase().trim(), password, 'ACTIVO']
   );
   return result.rows[0] || null;
 }
 
 export async function findUserByEmail(email) {
   const result = await pool.query(
-    'SELECT id_usuario AS id, correo AS email, primer_nombre AS nombre, primer_apellido AS apellidos, id_roles AS rol, "contraseña" AS password FROM usuario WHERE correo = $1 AND activo = TRUE',
-    [email.toLowerCase().trim()]
+    'SELECT id_usuario AS id, correo AS email, primer_nombre AS nombre, primer_apellido AS apellidos, id_roles AS rol, "contraseña" AS password FROM usuario WHERE correo = $1 AND estado_registro = $2',
+    [email.toLowerCase().trim(), 'ACTIVO']
   );
   return result.rows[0] || null;
 }
 
-export async function fetchAllUsers() {
+export async function fetchAllUsers(estado = 'ACTIVO') {
   const result = await pool.query(
     `SELECT
       u.id_usuario AS id,
@@ -25,11 +25,15 @@ export async function fetchAllUsers() {
       u.primer_apellido,
       u.id_roles AS rol,
       u."contraseña" AS password,
+      u.estado_registro,
+      u.motivo_estado,
+      u.fecha_cambio_estado,
       COALESCE((SELECT array_agg(idfinca) FROM usuario_finca uf WHERE uf.id_usuario = u.id_usuario), ARRAY[]::integer[]) AS fincas,
       COALESCE((SELECT array_agg(idcultivo) FROM usuario_cultivo uc WHERE uc.id_usuario = u.id_usuario), ARRAY[]::integer[]) AS cultivos
     FROM usuario u
-    WHERE u.activo = TRUE
-    ORDER BY u.id_usuario`
+    WHERE u.estado_registro = $1
+    ORDER BY u.id_usuario`,
+    [estado]
   );
   return result.rows;
 }
@@ -37,8 +41,8 @@ export async function fetchAllUsers() {
 export async function createUser({ nombre, apellidos, correo, contraseña, rol, fincas = [], cultivos = [] }) {
   const roleId = rol === 'administrador' ? 1 : 2
   const result = await pool.query(
-    'INSERT INTO usuario (primer_nombre, primer_apellido, correo, "contraseña", id_roles, activo) VALUES ($1, $2, $3, $4, $5, TRUE) RETURNING id_usuario AS id, correo AS email, primer_nombre, primer_apellido, id_roles AS rol, "contraseña" AS password',
-    [nombre, apellidos, correo, contraseña, roleId]
+    'INSERT INTO usuario (primer_nombre, primer_apellido, correo, "contraseña", id_roles, estado_registro) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id_usuario AS id, correo AS email, primer_nombre, primer_apellido, id_roles AS rol, "contraseña" AS password, estado_registro',
+    [nombre, apellidos, correo, contraseña, roleId, 'ACTIVO']
   )
   
   const userId = result.rows[0].id;
@@ -65,7 +69,7 @@ export async function createUser({ nombre, apellidos, correo, contraseña, rol, 
 export async function updateUser(id, { nombre, apellidos, correo, contraseña, rol, fincas = [], cultivos = [] }) {
   const roleId = rol === 'administrador' ? 1 : 2
   const result = await pool.query(
-    'UPDATE usuario SET primer_nombre = $1, primer_apellido = $2, correo = $3, "contraseña" = $4, id_roles = $5 WHERE id_usuario = $6 RETURNING id_usuario AS id, correo AS email, primer_nombre, primer_apellido, id_roles AS rol, "contraseña" AS password',
+    'UPDATE usuario SET primer_nombre = $1, primer_apellido = $2, correo = $3, "contraseña" = $4, id_roles = $5 WHERE id_usuario = $6 RETURNING id_usuario AS id, correo AS email, primer_nombre, primer_apellido, id_roles AS rol, "contraseña" AS password, estado_registro',
     [nombre, apellidos, correo, contraseña, roleId, id]
   )
   
@@ -102,10 +106,25 @@ export async function updateUser(id, { nombre, apellidos, correo, contraseña, r
   return result.rows[0]
 }
 
+export async function changeUserState(id, nuevoEstado, motivo, usuarioId) {
+  const result = await pool.query(
+    `UPDATE usuario
+     SET estado_registro = $1,
+         motivo_estado = $2,
+         fecha_cambio_estado = NOW(),
+         usuario_cambio_estado = $3
+     WHERE id_usuario = $4
+     RETURNING id_usuario AS id, correo AS email, primer_nombre, primer_apellido, id_roles AS rol, estado_registro, motivo_estado, fecha_cambio_estado`,
+    [nuevoEstado, motivo, usuarioId, id]
+  );
+  return result.rows[0];
+}
+
+// Legacy function for backward compatibility
 export async function deleteUser(id) {
   const result = await pool.query(
-    'UPDATE usuario SET activo = FALSE WHERE id_usuario = $1 RETURNING id_usuario AS id',
-    [id]
+    'UPDATE usuario SET estado_registro = $1 WHERE id_usuario = $2 RETURNING id_usuario AS id',
+    ['DESACTIVADO', id]
   )
   return result.rows[0]
 }

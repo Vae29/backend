@@ -1,5 +1,5 @@
 import express from 'express';
-import { getFincas, getCultivosEnProceso, getCultivosPorFinca, getCultivoDetalle, getCategoriasCosto, getSubcategoriasPorCategoria, getEstadosPago, getEtapaEnProcesoPorCultivo, getEtapasPorCultivo, validateCultivoForCost, getTiposCultivo, getEstados, postCultivo, postCosto, putCosto, deleteCosto, putCultivo, deleteCultivo, getEtapasCatalog, postEtapaPorCultivo, putEtapaPorCultivo, deleteEtapaPorCultivo, getFincasPorUsuario, getCultivosPorUsuario, getCosechasPorCultivo, getUnidadesMedida, getTiposPrecio, postCosecha, putCosecha, deleteCosecha, getCostosPorFinca } from '../controllers/asignaciones-usuarioController.js';
+import { getFincas, getCultivosEnProceso, getCultivosPorFinca, getCultivoDetalle, getCategoriasCosto, getSubcategoriasPorCategoria, getEstadosPago, getEtapaEnProcesoPorCultivo, getEtapasPorCultivo, validateCultivoForCost, getTiposCultivo, getEstados, postCultivo, postCosto, putCosto, deleteCosto, putCultivo, deleteCultivo, changeCultivoStateController, changeCostoStateController, changeEtapaStateController, changeCosechaStateController, getEtapasCatalog, postEtapaPorCultivo, putEtapaPorCultivo, deleteEtapaPorCultivo, getFincasPorUsuario, getCultivosPorUsuario, getCosechasPorCultivo, getUnidadesMedida, getTiposPrecio, postCosecha, putCosecha, deleteCosecha, getCostosPorFinca } from '../controllers/asignaciones-usuarioController.js';
 import { verificarAccessToken, verificarWorker } from '../middleware/auth.js'
 
 const router = express.Router();
@@ -31,8 +31,12 @@ router.get('/costos/finca/:fincaId', verificarAccessToken, getCostosPorFinca);
 router.post('/cultivos', postCultivo);
 router.post('/costos', verificarAccessToken, postCosto);
 router.put('/costos/:id', verificarAccessToken, putCosto);
-router.delete('/costos/:id', verificarAccessToken, deleteCosto);
+router.patch('/costos/:id/state', verificarAccessToken, changeCostoStateController);
 router.put('/cultivos/:id', putCultivo);
+router.patch('/cultivos/:id/state', verificarAccessToken, changeCultivoStateController);
+router.patch('/cultivos/etapas/:id/state', verificarAccessToken, changeEtapaStateController);
+router.patch('/cosechas/:id/state', verificarAccessToken, changeCosechaStateController);
+router.delete('/costos/:id', verificarAccessToken, deleteCosto);
 router.delete('/cultivos/:id', deleteCultivo);
 router.delete('/cultivos/etapas/:etapaCultivoId', deleteEtapaPorCultivo);
 

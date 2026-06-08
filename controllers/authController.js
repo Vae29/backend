@@ -7,6 +7,7 @@ import {
   createUser,
   updateUser,
   deleteUser,
+  changeUserState,
   createPasswordResetToken,
   findValidPasswordResetToken,
   markPasswordResetTokenUsed,
@@ -374,9 +375,63 @@ export async function deleteUserController(req, res) {
   }
 }
 
+export async function changeUserStateController(req, res) {
+  try {
+    const { id } = req.params;
+    const { nuevoEstado, motivo } = req.body;
+    const usuarioId = req.user?.id;
+
+    if (!nuevoEstado || !['ACTIVO', 'DESACTIVADO'].includes(nuevoEstado)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Estado inválido',
+      });
+    }
+    if (!motivo || !motivo.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Motivo es obligatorio',
+      });
+    }
+    if (!usuarioId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Usuario no autenticado',
+      });
+    }
+
+    const updatedUser = await changeUserState(id, nuevoEstado, motivo.trim(), usuarioId);
+    if (!updatedUser) {
+      return res.status(404).json({
+        success: false,
+        message: 'Usuario no encontrado',
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Estado del usuario actualizado exitosamente',
+      data: {
+        id: updatedUser.id,
+        email: updatedUser.email,
+        estado_registro: updatedUser.estado_registro,
+        motivo_estado: updatedUser.motivo_estado,
+        fecha_cambio_estado: updatedUser.fecha_cambio_estado,
+      },
+    });
+  } catch (error) {
+    console.error('Error en changeUserStateController:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al cambiar el estado del usuario',
+    });
+  }
+}
+
 export async function getAllUsers(req, res) {
   try {
-    const usuarios = await fetchAllUsers();
+    const estado = req.query.estado || 'ACTIVO';
+    const usuarios = await fetchAllUsers(estado);
     const usersWithRoleLabel = usuarios.map((usuario) => ({
       id: usuario.id,
       nombre: usuario.primer_nombre,
@@ -384,6 +439,9 @@ export async function getAllUsers(req, res) {
       email: usuario.email,
       password: usuario.password,
       rol: Number(usuario.rol) === 1 ? 'Administrador' : 'Trabajador',
+      estado_registro: usuario.estado_registro,
+      motivo_estado: usuario.motivo_estado,
+      fecha_cambio_estado: usuario.fecha_cambio_estado,
       fincas: usuario.fincas || [],
       cultivos: usuario.cultivos || [],
     }));

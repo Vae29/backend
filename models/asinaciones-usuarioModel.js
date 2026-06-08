@@ -3,7 +3,7 @@ import pool from '../config/db.js';
 export async function fetchAllFincas() {
   try {
     const result = await pool.query(
-      'SELECT idfinca AS id, nombre, ubicacion FROM finca WHERE activo = TRUE ORDER BY nombre'
+      "SELECT idfinca AS id, nombre, ubicacion FROM finca WHERE estado_registro = 'ACTIVO' ORDER BY nombre"
     );
     return result.rows;
   } catch (error) {
@@ -19,8 +19,8 @@ export async function fetchCultivosEnProceso() {
        FROM cultivo c
        LEFT JOIN finca f ON c.idfinca = f.idfinca
        WHERE c.idestado = 1
-         AND c.activo = TRUE
-         AND f.activo = TRUE
+         AND c.estado_registro = 'ACTIVO'
+         AND f.estado_registro = 'ACTIVO'
        ORDER BY f.nombre, c.nombre`
     );
     return result.rows;
@@ -30,7 +30,7 @@ export async function fetchCultivosEnProceso() {
   }
 }
 
-export async function fetchCultivosPorFinca(fincaId) {
+export async function fetchCultivosPorFinca(fincaId, estado = 'ACTIVO') {
   try {
     const result = await pool.query(
       `SELECT 
@@ -43,7 +43,8 @@ export async function fetchCultivosPorFinca(fincaId) {
         c.fecha_final AS "fechaCosecha",
         e.nombre AS estado,
         c.idestado,
-        c.activo,
+        c.estado_registro AS estado_registro,
+        CASE WHEN c.estado_registro = 'ACTIVO' THEN TRUE ELSE FALSE END AS activo,
         etapa_activa.nombre AS "etapaActual",
         etapa_activa.fecha_inicio AS "etapaActualInicio"
        FROM cultivo c
@@ -56,15 +57,15 @@ export async function fetchCultivosPorFinca(fincaId) {
          LEFT JOIN etapas et ON ec.idetapa = et.idetapa
          WHERE ec.idcultivo = c.idcultivo
            AND ec.idestado = 1
-           AND ec.activo = TRUE
+           AND ec.estado_registro = 'ACTIVO'
          ORDER BY ec.fecha_inicio DESC
          LIMIT 1
        ) etapa_activa ON TRUE
        WHERE c.idfinca = $1
-         AND c.activo = TRUE
-         AND f.activo = TRUE
+         AND c.estado_registro = $2
+         AND f.estado_registro = 'ACTIVO'
        ORDER BY c.nombre`,
-      [fincaId]
+      [fincaId, estado]
     );
     return result.rows;
   } catch (error) {
@@ -73,13 +74,13 @@ export async function fetchCultivosPorFinca(fincaId) {
   }
 }
 
-export async function fetchCultivosPorUsuario(idUsuario, fincaId = null) {
+export async function fetchCultivosPorUsuario(idUsuario, fincaId = null, estado = 'ACTIVO') {
   try {
-    const params = [idUsuario]
+    const params = [idUsuario, estado]
     let filtroFinca = ''
     if (fincaId) {
       params.push(fincaId)
-      filtroFinca = 'AND c.idfinca = $2'
+      filtroFinca = 'AND c.idfinca = $3'
     }
     const result = await pool.query(
       `SELECT
@@ -99,7 +100,7 @@ export async function fetchCultivosPorUsuario(idUsuario, fincaId = null) {
        LEFT JOIN finca f ON c.idfinca = f.idfinca
        INNER JOIN usuario_cultivo uc ON uc.idcultivo = c.idcultivo
        WHERE uc.id_usuario = $1
-         AND c.activo = TRUE
+         AND c.estado_registro = $2
          ${filtroFinca}
        ORDER BY c.nombre`,
       params
@@ -121,7 +122,7 @@ export async function fetchFincasPorUsuario(idUsuario) {
        FROM finca f
        INNER JOIN usuario_finca uf ON uf.idfinca = f.idfinca
        WHERE uf.id_usuario = $1
-         AND f.activo = TRUE
+         AND f.estado_registro = 'ACTIVO'
        ORDER BY f.nombre`,
       [idUsuario]
     )
@@ -146,6 +147,9 @@ export async function fetchCultivoDetalleById(idcultivo) {
         cc.idcategoria AS "categoriaId",
         cc.nombre AS categoria,
         et.nombre_etapa AS etapa,
+        co.estado_registro AS estado_registro,
+        co.motivo_estado AS motivo_estado,
+        co.fecha_cambio_estado AS fecha_cambio_estado,
         ep.idestado_pago AS "estadoPagoId",
         ep.nombre AS estado_pago
       FROM costo co
@@ -180,6 +184,9 @@ export async function fetchCostosPorFinca(idfinca) {
         cc.idcategoria AS "categoriaId",
         cc.nombre AS categoria,
         cu.nombre AS cultivo,
+        co.estado_registro AS estado_registro,
+        co.motivo_estado AS motivo_estado,
+        co.fecha_cambio_estado AS fecha_cambio_estado,
         ep.idestado_pago AS "estadoPagoId",
         ep.nombre AS estado_pago
       FROM costo co
@@ -210,11 +217,12 @@ export async function fetchEtapasPorCultivo(idcultivo) {
          ec.fecha_final AS "fechaFinal",
          ec.idestado,
          e.nombre AS estado,
-         ec.activo
+         ec.estado_registro AS estado_registro,
+         CASE WHEN ec.estado_registro = 'ACTIVO' THEN TRUE ELSE FALSE END AS activo
        FROM etapa_cultivo ec
        LEFT JOIN etapas et ON ec.idetapa = et.idetapa
        LEFT JOIN estado e ON ec.idestado = e.idestado
-       WHERE ec.idcultivo = $1 AND ec.activo = TRUE
+       WHERE ec.idcultivo = $1
        ORDER BY ec.fecha_inicio DESC`,
       [idcultivo]
     );
@@ -243,7 +251,7 @@ export async function finalizeEtapaEnProceso(idcultivo) {
     const estadoRes = await pool.query("SELECT idestado FROM estado WHERE LOWER(nombre) LIKE 'finaliz%' LIMIT 1")
     const finalizadoId = estadoRes.rows[0]?.idestado || 2
     const result = await pool.query(
-      `UPDATE etapa_cultivo SET idestado = $2, fecha_final = CURRENT_DATE WHERE idcultivo = $1 AND idestado = 1 RETURNING idetapacultivo AS id, idetapa, descripcion, fecha_inicio AS "fechaInicio", fecha_final AS "fechaFinal", idestado, activo`,
+      `UPDATE etapa_cultivo SET idestado = $2, fecha_final = CURRENT_DATE WHERE idcultivo = $1 AND idestado = 1 RETURNING idetapacultivo AS id, idetapa, descripcion, fecha_inicio AS "fechaInicio", fecha_final AS "fechaFinal", idestado, estado_registro AS estado_registro, CASE WHEN estado_registro = 'ACTIVO' THEN TRUE ELSE FALSE END AS activo`,
       [idcultivo, finalizadoId]
     )
     return result.rows
@@ -257,9 +265,9 @@ export async function createEtapaParaCultivo({ idcultivo, idetapa, descripcion }
   try {
     const inProcessId = 1
     const result = await pool.query(
-      `INSERT INTO etapa_cultivo (idetapa, idcultivo, descripcion, fecha_inicio, idestado, activo)
-       VALUES ($1, $2, $3, CURRENT_DATE, $4, TRUE)
-       RETURNING idetapacultivo AS id, idetapa, descripcion, fecha_inicio AS "fechaInicio", fecha_final AS "fechaFinal", idestado, activo`,
+      `INSERT INTO etapa_cultivo (idetapa, idcultivo, descripcion, fecha_inicio, idestado, estado_registro)
+       VALUES ($1, $2, $3, CURRENT_DATE, $4, 'ACTIVO')
+       RETURNING idetapacultivo AS id, idetapa, descripcion, fecha_inicio AS "fechaInicio", fecha_final AS "fechaFinal", idestado, estado_registro AS estado_registro, CASE WHEN estado_registro = 'ACTIVO' THEN TRUE ELSE FALSE END AS activo`,
       [idetapa, idcultivo, descripcion || null, inProcessId]
     )
     return result.rows[0]
@@ -327,7 +335,7 @@ export async function updateEtapaParaCultivo(
       return null
     }
 
-    const query = `UPDATE etapa_cultivo SET ${setClauses.join(', ')} WHERE idetapacultivo = $${paramIndex} RETURNING idetapacultivo AS id, idetapa, descripcion, fecha_inicio AS "fechaInicio", fecha_final AS "fechaFinal", idestado, activo`
+    const query = `UPDATE etapa_cultivo SET ${setClauses.join(', ')} WHERE idetapacultivo = $${paramIndex} RETURNING idetapacultivo AS id, idetapa, descripcion, fecha_inicio AS "fechaInicio", fecha_final AS "fechaFinal", idestado, estado_registro AS estado_registro, CASE WHEN estado_registro = 'ACTIVO' THEN TRUE ELSE FALSE END AS activo`
     values.push(idetapacultivo)
 
     const result = await pool.query(query, values)
@@ -353,7 +361,7 @@ export async function deleteOrDeactivateEtapaById(idetapaCultivo) {
     let result
     if (costCount > 0) {
       result = await client.query(
-        'UPDATE etapa_cultivo SET activo = FALSE WHERE idetapacultivo = $1 RETURNING idetapacultivo AS id',
+        "UPDATE etapa_cultivo SET estado_registro = 'ANULADO' WHERE idetapacultivo = $1 RETURNING idetapacultivo AS id",
         [idetapaCultivo]
       )
       action = 'deactivated'
@@ -537,7 +545,7 @@ export async function fetchEtapaEnProcesoPorCultivo(idcultivo) {
       `SELECT ec.idetapacultivo, et.nombre_etapa
        FROM etapa_cultivo ec
        LEFT JOIN etapas et ON ec.idetapa = et.idetapa
-       WHERE ec.idcultivo = $1 AND ec.idestado = 1 AND ec.activo = TRUE
+       WHERE ec.idcultivo = $1 AND ec.idestado = 1 AND ec.estado_registro = 'ACTIVO'
        LIMIT 1`,
       [idcultivo]
     );
@@ -552,7 +560,7 @@ export async function validateCultivoCanAddCosto(idcultivo) {
   try {
     // Verificar si el cultivo está en estado "En Proceso" (idestado = 1)
     const cultivoResult = await pool.query(
-      'SELECT idestado FROM cultivo WHERE idcultivo = $1 AND activo = TRUE',
+      "SELECT idestado FROM cultivo WHERE idcultivo = $1 AND estado_registro = 'ACTIVO'",
       [idcultivo]
     );
     if (!cultivoResult.rows.length) {
@@ -576,7 +584,7 @@ export async function validateCultivoCanAddCosto(idcultivo) {
 
     // Verificar si hay etapa activa en proceso
     const etapaEnProcesoResult = await pool.query(
-      'SELECT COUNT(*) as count FROM etapa_cultivo WHERE idcultivo = $1 AND idestado = 1 AND activo = TRUE',
+      "SELECT COUNT(*) as count FROM etapa_cultivo WHERE idcultivo = $1 AND idestado = 1 AND estado_registro = 'ACTIVO'",
       [idcultivo]
     );
 
@@ -599,7 +607,7 @@ export async function validateCultivoCanAddCosecha(idcultivo) {
        LEFT JOIN etapas et ON ec.idetapa = et.idetapa
        WHERE ec.idcultivo = $1
          AND ec.idestado = 1
-         AND ec.activo = TRUE
+         AND ec.estado_registro = 'ACTIVO'
          AND LOWER(et.nombre_etapa) = LOWER('Cosecha')
        LIMIT 1`,
       [idcultivo]
@@ -624,7 +632,10 @@ export async function fetchCosechasPorCultivo(idcultivo) {
          c.idunidadmedida AS unidadMedidaId,
          um.nombre AS unidad,
          c.idtipoprecio AS tipoPrecioId,
-         tp.nombre AS tipoPrecio
+         tp.nombre AS tipoPrecio,
+         c.estado_registro AS estado_registro,
+         c.motivo_estado AS motivo_estado,
+         c.fecha_cambio_estado AS fecha_cambio_estado
        FROM cosecha c
        LEFT JOIN unidades_medidas um ON c.idunidadmedida = um.idunidadmedida
        LEFT JOIN tipo_precio tp ON c.idtipoprecio = tp.idtipoprecio
@@ -718,7 +729,7 @@ export async function validateActiveEtapaForCultivo(idetapacultivo, idcultivo) {
        WHERE idetapacultivo = $1
          AND idcultivo = $2
          AND idestado = 1
-         AND activo = TRUE
+         AND estado_registro = 'ACTIVO'
        LIMIT 1`,
       [idetapacultivo, idcultivo]
     );
@@ -778,8 +789,64 @@ export async function deleteCostoById(idcosto) {
 
 export async function deleteCultivoById(idcultivo) {
   const result = await pool.query(
-    'UPDATE cultivo SET activo = FALSE WHERE idcultivo = $1 RETURNING idcultivo AS id, nombre',
+    "UPDATE cultivo SET estado_registro = 'ARCHIVADO' WHERE idcultivo = $1 RETURNING idcultivo AS id, nombre",
     [idcultivo]
+  );
+  return result.rows[0] || null;
+}
+
+export async function changeCultivoState(idcultivo, nuevoEstado, motivo, usuarioId) {
+  const result = await pool.query(
+    `UPDATE cultivo
+     SET estado_registro = $1,
+         motivo_estado = $2,
+         fecha_cambio_estado = NOW(),
+         usuario_cambio_estado = $3
+     WHERE idcultivo = $4
+     RETURNING idcultivo AS id, nombre, estado_registro AS estado_registro, motivo_estado, fecha_cambio_estado`,
+    [nuevoEstado, motivo, usuarioId, idcultivo]
+  );
+  return result.rows[0] || null;
+}
+
+export async function changeCostoState(idcosto, nuevoEstado, motivo, usuarioId) {
+  const result = await pool.query(
+    `UPDATE costo
+     SET estado_registro = $1,
+         motivo_estado = $2,
+         fecha_cambio_estado = NOW(),
+         usuario_cambio_estado = $3
+     WHERE idcosto = $4
+     RETURNING idcosto AS id, estado_registro, motivo_estado, fecha_cambio_estado`,
+    [nuevoEstado, motivo, usuarioId, idcosto]
+  );
+  return result.rows[0] || null;
+}
+
+export async function changeEtapaState(idetapacultivo, nuevoEstado, motivo, usuarioId) {
+  const result = await pool.query(
+    `UPDATE etapa_cultivo
+     SET estado_registro = $1,
+         motivo_estado = $2,
+         fecha_cambio_estado = NOW(),
+         usuario_cambio_estado = $3
+     WHERE idetapacultivo = $4
+     RETURNING idetapacultivo AS id, estado_registro, motivo_estado, fecha_cambio_estado`,
+    [nuevoEstado, motivo, usuarioId, idetapacultivo]
+  );
+  return result.rows[0] || null;
+}
+
+export async function changeCosechaState(idcosecha, nuevoEstado, motivo, usuarioId) {
+  const result = await pool.query(
+    `UPDATE cosecha
+     SET estado_registro = $1,
+         motivo_estado = $2,
+         fecha_cambio_estado = NOW(),
+         usuario_cambio_estado = $3
+     WHERE idcosecha = $4
+     RETURNING idcosecha AS id, estado_registro, motivo_estado, fecha_cambio_estado`,
+    [nuevoEstado, motivo, usuarioId, idcosecha]
   );
   return result.rows[0] || null;
 }

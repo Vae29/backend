@@ -1,4 +1,4 @@
-﻿import { fetchAllFincas, fetchCultivosEnProceso, fetchCultivosPorFinca, fetchCultivoDetalleById, fetchCostosPorFinca, fetchCategoriasCosto, fetchSubcategoriasPorCategoria, fetchEstadosPago, fetchEtapaEnProcesoPorCultivo, validateCultivoCanAddCosto, validateActiveEtapaForCultivo, createCosto, updateCosto, deleteCostoById, fetchTiposCultivo, fetchEstados, fetchEstadoById, createCultivo, updateCultivo, fetchCultivosPorUsuario, fetchFincasPorUsuario, deleteOrDeactivateEtapaById, deleteCultivoById, fetchEtapasPorCultivo, fetchAllEtapasCatalog, finalizeEtapaEnProceso, createEtapaParaCultivo, updateEtapaParaCultivo, fetchCosechasPorCultivo, fetchUnidadesMedida, fetchTiposPrecio, validateCultivoCanAddCosecha, createCosecha, updateCosecha, deleteCosechaById } from '../models/asinaciones-usuarioModel.js';
+﻿import { fetchAllFincas, fetchCultivosEnProceso, fetchCultivosPorFinca, fetchCultivoDetalleById, fetchCostosPorFinca, fetchCategoriasCosto, fetchSubcategoriasPorCategoria, fetchEstadosPago, fetchEtapaEnProcesoPorCultivo, validateCultivoCanAddCosto, validateActiveEtapaForCultivo, createCosto, updateCosto, deleteCostoById, fetchTiposCultivo, fetchEstados, fetchEstadoById, createCultivo, updateCultivo, fetchCultivosPorUsuario, fetchFincasPorUsuario, deleteOrDeactivateEtapaById, deleteCultivoById, changeCultivoState, changeCostoState, changeEtapaState, changeCosechaState, fetchEtapasPorCultivo, fetchAllEtapasCatalog, finalizeEtapaEnProceso, createEtapaParaCultivo, updateEtapaParaCultivo, fetchCosechasPorCultivo, fetchUnidadesMedida, fetchTiposPrecio, validateCultivoCanAddCosecha, createCosecha, updateCosecha, deleteCosechaById } from '../models/asinaciones-usuarioModel.js';
 import { parseCurrencyValue } from '../utils/currency.js'
 
 export async function getFincas(req, res) {
@@ -50,13 +50,23 @@ export async function getCultivosEnProceso(req, res) {
 export async function getCultivosPorFinca(req, res) {
   try {
     const { fincaId } = req.params;
+    const estado = String(req.query.estado || 'ACTIVO').toUpperCase();
+    const allowedEstados = ['ACTIVO', 'ARCHIVADO'];
+
     if (!fincaId || isNaN(fincaId)) {
       return res.status(400).json({
         success: false,
-        message: 'ID de finca invÃ¡lido',
+        message: 'ID de finca inválido',
       });
     }
-    const cultivos = await fetchCultivosPorFinca(Number(fincaId));
+    if (!allowedEstados.includes(estado)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Estado inválido',
+      });
+    }
+
+    const cultivos = await fetchCultivosPorFinca(Number(fincaId), estado);
     res.json({
       success: true,
       data: cultivos,
@@ -417,8 +427,15 @@ export async function getCultivosPorUsuario(req, res) {
       return res.status(401).json({ success: false, message: 'Usuario no autenticado' })
     }
     const fincaId = req.query.fincaId ? Number(req.query.fincaId) : null
-    console.log('[DEBUG] getCultivosPorUsuario - req.user.id:', userId, 'fincaId:', fincaId)
-    const data = await fetchCultivosPorUsuario(Number(userId), fincaId)
+    const estado = String(req.query.estado || 'ACTIVO').toUpperCase()
+    const allowedEstados = ['ACTIVO', 'ARCHIVADO']
+
+    if (!allowedEstados.includes(estado)) {
+      return res.status(400).json({ success: false, message: 'Estado inválido' })
+    }
+
+    console.log('[DEBUG] getCultivosPorUsuario - req.user.id:', userId, 'fincaId:', fincaId, 'estado:', estado)
+    const data = await fetchCultivosPorUsuario(Number(userId), fincaId, estado)
     console.log('[DEBUG] getCultivosPorUsuario - result count:', Array.isArray(data) ? data.length : 0)
     res.json({ success: true, data })
   } catch (error) {
@@ -741,7 +758,7 @@ export async function deleteCultivo(req, res) {
     const { id } = req.params;
     const cultivoId = Number(id);
     if (!cultivoId || isNaN(cultivoId)) {
-      return res.status(400).json({ success: false, message: 'ID de cultivo invÃ¡lido' });
+      return res.status(400).json({ success: false, message: 'ID de cultivo inválido' });
     }
 
     const deleted = await deleteCultivoById(cultivoId);
@@ -753,6 +770,142 @@ export async function deleteCultivo(req, res) {
   } catch (error) {
     console.error('Error en deleteCultivo:', error);
     res.status(500).json({ success: false, message: 'Error al eliminar cultivo' });
+  }
+}
+
+export async function changeCultivoStateController(req, res) {
+  try {
+    const { id } = req.params;
+    const cultivoId = Number(id);
+    const { nuevoEstado, motivo } = req.body;
+    const usuarioId = req.user?.id;
+    const allowedEstados = ['ACTIVO', 'ARCHIVADO'];
+
+    if (!cultivoId || isNaN(cultivoId)) {
+      return res.status(400).json({ success: false, message: 'ID de cultivo inválido' });
+    }
+    if (!nuevoEstado || !allowedEstados.includes(nuevoEstado)) {
+      return res.status(400).json({ success: false, message: 'Estado inválido' });
+    }
+    if (!motivo || !motivo.trim()) {
+      return res.status(400).json({ success: false, message: 'Motivo es obligatorio' });
+    }
+    if (!usuarioId) {
+      return res.status(401).json({ success: false, message: 'Usuario no autenticado' });
+    }
+
+    const updated = await changeCultivoState(cultivoId, nuevoEstado, motivo.trim(), usuarioId);
+    if (!updated) {
+      return res.status(404).json({ success: false, message: 'Cultivo no encontrado' });
+    }
+
+    res.json({
+      success: true,
+      message: 'Estado del cultivo actualizado exitosamente',
+      data: updated,
+    });
+  } catch (error) {
+    console.error('Error en changeCultivoStateController:', error);
+    res.status(500).json({ success: false, message: 'Error al cambiar el estado del cultivo' });
+  }
+}
+
+export async function changeCostoStateController(req, res) {
+  try {
+    const { id } = req.params;
+    const costoId = Number(id);
+    const { nuevoEstado, motivo } = req.body;
+    const usuarioId = req.user?.id;
+    const allowedEstados = ['ACTIVO', 'ANULADO'];
+
+    if (!costoId || isNaN(costoId)) {
+      return res.status(400).json({ success: false, message: 'ID de costo inválido' });
+    }
+    if (!nuevoEstado || !allowedEstados.includes(nuevoEstado)) {
+      return res.status(400).json({ success: false, message: 'Estado inválido' });
+    }
+    if (!motivo || !motivo.trim()) {
+      return res.status(400).json({ success: false, message: 'Motivo es obligatorio' });
+    }
+    if (!usuarioId) {
+      return res.status(401).json({ success: false, message: 'Usuario no autenticado' });
+    }
+
+    const updated = await changeCostoState(costoId, nuevoEstado, motivo.trim(), usuarioId);
+    if (!updated) {
+      return res.status(404).json({ success: false, message: 'Costo no encontrado' });
+    }
+
+    res.json({ success: true, message: 'Estado del costo actualizado exitosamente', data: updated });
+  } catch (error) {
+    console.error('Error en changeCostoStateController:', error);
+    res.status(500).json({ success: false, message: 'Error al cambiar el estado del costo' });
+  }
+}
+
+export async function changeEtapaStateController(req, res) {
+  try {
+    const { id } = req.params;
+    const etapaId = Number(id);
+    const { nuevoEstado, motivo } = req.body;
+    const usuarioId = req.user?.id;
+    const allowedEstados = ['ACTIVO', 'ANULADO'];
+
+    if (!etapaId || isNaN(etapaId)) {
+      return res.status(400).json({ success: false, message: 'ID de etapa inválido' });
+    }
+    if (!nuevoEstado || !allowedEstados.includes(nuevoEstado)) {
+      return res.status(400).json({ success: false, message: 'Estado inválido' });
+    }
+    if (!motivo || !motivo.trim()) {
+      return res.status(400).json({ success: false, message: 'Motivo es obligatorio' });
+    }
+    if (!usuarioId) {
+      return res.status(401).json({ success: false, message: 'Usuario no autenticado' });
+    }
+
+    const updated = await changeEtapaState(etapaId, nuevoEstado, motivo.trim(), usuarioId);
+    if (!updated) {
+      return res.status(404).json({ success: false, message: 'Etapa no encontrada' });
+    }
+
+    res.json({ success: true, message: 'Estado de la etapa actualizado exitosamente', data: updated });
+  } catch (error) {
+    console.error('Error en changeEtapaStateController:', error);
+    res.status(500).json({ success: false, message: 'Error al cambiar el estado de la etapa' });
+  }
+}
+
+export async function changeCosechaStateController(req, res) {
+  try {
+    const { id } = req.params;
+    const cosechaId = Number(id);
+    const { nuevoEstado, motivo } = req.body;
+    const usuarioId = req.user?.id;
+    const allowedEstados = ['ACTIVO', 'ANULADO'];
+
+    if (!cosechaId || isNaN(cosechaId)) {
+      return res.status(400).json({ success: false, message: 'ID de cosecha inválido' });
+    }
+    if (!nuevoEstado || !allowedEstados.includes(nuevoEstado)) {
+      return res.status(400).json({ success: false, message: 'Estado inválido' });
+    }
+    if (!motivo || !motivo.trim()) {
+      return res.status(400).json({ success: false, message: 'Motivo es obligatorio' });
+    }
+    if (!usuarioId) {
+      return res.status(401).json({ success: false, message: 'Usuario no autenticado' });
+    }
+
+    const updated = await changeCosechaState(cosechaId, nuevoEstado, motivo.trim(), usuarioId);
+    if (!updated) {
+      return res.status(404).json({ success: false, message: 'Cosecha no encontrada' });
+    }
+
+    res.json({ success: true, message: 'Estado de la cosecha actualizado exitosamente', data: updated });
+  } catch (error) {
+    console.error('Error en changeCosechaStateController:', error);
+    res.status(500).json({ success: false, message: 'Error al cambiar el estado de la cosecha' });
   }
 }
 

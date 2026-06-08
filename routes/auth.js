@@ -1,5 +1,5 @@
 import express from 'express';
-import { login, getAllUsers, createUserController, updateUserController, deleteUserController, requestPasswordReset, verifyResetCode, recoverPassword, refreshToken, logout, obtenerMisSesiones } from '../controllers/authController.js';
+import { login, getAllUsers, createUserController, updateUserController, deleteUserController, changeUserStateController, requestPasswordReset, verifyResetCode, recoverPassword, refreshToken, logout, obtenerMisSesiones } from '../controllers/authController.js';
 import { verificarAccessToken } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -15,5 +15,6 @@ router.get('/users', getAllUsers);
 router.post('/users', createUserController);
 router.put('/users/:id', updateUserController);
 router.delete('/users/:id', deleteUserController);
+router.patch('/users/:id/state', verificarAccessToken, changeUserStateController);
 
 export default router;

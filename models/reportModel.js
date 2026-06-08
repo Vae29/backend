@@ -10,7 +10,8 @@ export async function getFilters(fincaId) {
     const cultivosQuery = `
       SELECT idcultivo AS id, nombre, idfinca
       FROM cultivo
-      WHERE $1::int IS NULL OR idfinca = $1
+      WHERE (COALESCE(UPPER(estado_registro), '') = 'ACTIVO')
+        AND ($1::int IS NULL OR idfinca = $1)
       ORDER BY nombre
     `;
     const usuariosQuery = `
@@ -51,6 +52,13 @@ export async function getFilters(fincaId) {
 function buildCommonWhere(filters, params) {
   const where = [];
   const { fincaId, cultivoId, categoriaId, usuarioId, estado, fechaInicio, fechaFin } = filters || {};
+
+  // Filtro obligatorio: solo registros ACTIVOS de cultivo
+  where.push(`COALESCE(UPPER(cu.estado_registro), '') = 'ACTIVO'`);
+  // Filtro obligatorio: solo registros ACTIVOS de costo (si existen en la query)
+  where.push(`(co.idcosto IS NULL OR COALESCE(UPPER(co.estado_registro), '') = 'ACTIVO')`);
+  // Filtro obligatorio: solo registros ACTIVOS de cosecha (si existen en la query)
+  where.push(`(cc.idcosecha IS NULL OR COALESCE(UPPER(cc.estado_registro), '') = 'ACTIVO')`);
 
   if (fincaId) {
     params.push(Number(fincaId));
@@ -212,6 +220,11 @@ export async function reportByTrabajador(filters = {}) {
     const params = [];
     let where = [];
     const { fincaId, cultivoId, usuarioId, estado, estadoId, fechaInicio, fechaFin } = filters || {};
+
+    // Filtro obligatorio: solo registros ACTIVOS
+    where.push(`COALESCE(UPPER(cu.estado_registro), '') = 'ACTIVO'`);
+    where.push(`(co.idcosto IS NULL OR COALESCE(UPPER(co.estado_registro), '') = 'ACTIVO')`);
+    where.push(`(cc.idcosecha IS NULL OR COALESCE(UPPER(cc.estado_registro), '') = 'ACTIVO')`);
 
     if (usuarioId) {
       params.push(Number(usuarioId));

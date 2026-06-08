@@ -52,26 +52,49 @@ export async function findDashboardByFinca(fincaId, filters = {}) {
       FROM cultivo c
       LEFT JOIN estado e ON c.idestado = e.idestado
       WHERE c.idfinca = $1
+        AND COALESCE(UPPER(c.estado_registro), '') = 'ACTIVO'
     ),
     costos AS (
-      SELECT idcultivo, SUM(valor) AS total_costos
-      FROM costo
-      WHERE ${buildDashboardPeriodCondition('costo', 'fecha')}
-      GROUP BY idcultivo
+      SELECT c.idcultivo, SUM(co.valor) AS total_costos
+      FROM costo co
+      JOIN cultivo c ON c.idcultivo = co.idcultivo
+      WHERE c.idfinca = $1
+        AND COALESCE(UPPER(co.estado_registro), '') = 'ACTIVO'
+        AND ${buildDashboardPeriodCondition('co', 'fecha')}
+      GROUP BY c.idcultivo
+    ),
+    costos_totales AS (
+      SELECT COALESCE(SUM(co.valor), 0) AS total_costos
+      FROM costo co
+      WHERE co.idfinca = $1
+        AND COALESCE(UPPER(co.estado_registro), '') = 'ACTIVO'
+        AND ${buildDashboardPeriodCondition('co', 'fecha')}
     ),
     ingresos AS (
-      SELECT idcultivo,
-             SUM(cantidad_cosechada * precio_unitario) AS total_ingresos,
-             SUM(cantidad_cosechada) AS total_produccion
-      FROM cosecha
-      WHERE ${buildDashboardPeriodCondition('cosecha', 'fecha_cosecha')}
-      GROUP BY idcultivo
+      SELECT c.idcultivo,
+             SUM(ce.cantidad_cosechada * ce.precio_unitario) AS total_ingresos,
+             SUM(ce.cantidad_cosechada) AS total_produccion
+      FROM cosecha ce
+      JOIN cultivo c ON c.idcultivo = ce.idcultivo
+      WHERE c.idfinca = $1
+        AND COALESCE(UPPER(ce.estado_registro), '') = 'ACTIVO'
+        AND ${buildDashboardPeriodCondition('ce', 'fecha_cosecha')}
+      GROUP BY c.idcultivo
+    ),
+    ingresos_totales AS (
+      SELECT COALESCE(SUM(ce.cantidad_cosechada * ce.precio_unitario), 0) AS total_ingresos,
+             COALESCE(SUM(ce.cantidad_cosechada), 0) AS total_produccion
+      FROM cosecha ce
+      JOIN cultivo c ON c.idcultivo = ce.idcultivo
+      WHERE c.idfinca = $1
+        AND COALESCE(UPPER(ce.estado_registro), '') = 'ACTIVO'
+        AND ${buildDashboardPeriodCondition('ce', 'fecha_cosecha')}
     )
     SELECT
       COALESCE(COUNT(*), 0) AS total_cultivos,
-      COALESCE(SUM(costos.total_costos), 0) AS total_costos,
-      COALESCE(SUM(ingresos.total_ingresos), 0) AS total_ingresos,
-      COALESCE(SUM(ingresos.total_produccion), 0) AS total_produccion,
+      COALESCE((SELECT total_costos FROM costos_totales), 0) AS total_costos,
+      COALESCE((SELECT total_ingresos FROM ingresos_totales), 0) AS total_ingresos,
+      COALESCE((SELECT total_produccion FROM ingresos_totales), 0) AS total_produccion,
       COUNT(*) FILTER (WHERE cultivos.estado <> 'finalizado' OR cultivos.estado = '') AS cultivos_activos,
       COUNT(*) FILTER (WHERE cultivos.estado = 'finalizado') AS cultivos_finalizados
     FROM cultivos
@@ -87,28 +110,39 @@ export async function findDashboardByFinca(fincaId, filters = {}) {
              c.nombre,
              c.fecha_inicio,
              c.fecha_final,
-             COALESCE(LOWER(e.nombre), '') AS estado
+             COALESCE(LOWER(e.nombre), '') AS estado,
+             COALESCE(UPPER(c.estado_registro), '') AS estado_registro
       FROM cultivo c
       LEFT JOIN estado e ON c.idestado = e.idestado
       WHERE c.idfinca = $1
+        AND COALESCE(UPPER(c.estado_registro), '') = 'ACTIVO'
     ),
     costos AS (
-      SELECT idcultivo, SUM(valor) AS total_costos
-      FROM costo
-      WHERE ${buildDashboardPeriodCondition('costo', 'fecha')}
-      GROUP BY idcultivo
+      SELECT co.idcultivo, SUM(co.valor) AS total_costos
+      FROM costo co
+      JOIN cultivo c ON c.idcultivo = co.idcultivo
+      WHERE c.idfinca = $1
+        AND COALESCE(UPPER(c.estado_registro), '') = 'ACTIVO'
+        AND COALESCE(UPPER(co.estado_registro), '') = 'ACTIVO'
+        AND ${buildDashboardPeriodCondition('co', 'fecha')}
+      GROUP BY co.idcultivo
     ),
     ingresos AS (
-      SELECT idcultivo,
-             SUM(cantidad_cosechada * precio_unitario) AS total_ingresos
-      FROM cosecha
-      WHERE ${buildDashboardPeriodCondition('cosecha', 'fecha_cosecha')}
-      GROUP BY idcultivo
+      SELECT ce.idcultivo,
+             SUM(ce.cantidad_cosechada * ce.precio_unitario) AS total_ingresos
+      FROM cosecha ce
+      JOIN cultivo c ON c.idcultivo = ce.idcultivo
+      WHERE c.idfinca = $1
+        AND COALESCE(UPPER(c.estado_registro), '') = 'ACTIVO'
+        AND COALESCE(UPPER(ce.estado_registro), '') = 'ACTIVO'
+        AND ${buildDashboardPeriodCondition('ce', 'fecha_cosecha')}
+      GROUP BY ce.idcultivo
     )
     SELECT
       cultivos.idcultivo AS id,
       cultivos.nombre,
       cultivos.estado,
+      cultivos.estado_registro AS estado_registro,
       TO_CHAR(cultivos.fecha_inicio, 'DD/MM/YYYY') AS fecha_inicio,
       COALESCE(TO_CHAR(cultivos.fecha_final, 'DD/MM/YYYY'), '--') AS fecha_final,
       COALESCE(costos.total_costos, 0) AS costo,
@@ -130,9 +164,11 @@ export async function findDashboardByFinca(fincaId, filters = {}) {
         COALESCE(SUM(co.valor), 0) AS total
       FROM categoria_costo cc
       LEFT JOIN subcategoria_costo sc ON sc.idcategoria = cc.idcategoria
-      LEFT JOIN costo co ON co.idsubcategoria = sc.idsubcategoria
-      LEFT JOIN cultivo cu ON co.idcultivo = cu.idcultivo AND cu.idfinca = $1
-      WHERE co.idcosto IS NULL OR ${buildDashboardPeriodCondition('co', 'fecha')}
+      LEFT JOIN costo co ON co.idsubcategoria = sc.idsubcategoria AND co.idfinca = $1
+      LEFT JOIN cultivo cu ON co.idcultivo = cu.idcultivo
+      WHERE COALESCE(UPPER(co.estado_registro), '') = 'ACTIVO'
+        AND (co.idcultivo IS NULL OR cu.idcultivo IS NOT NULL)
+        AND ${buildDashboardPeriodCondition('co', 'fecha')}
       GROUP BY cc.nombre
       ORDER BY total DESC, cc.nombre;
   `;
@@ -149,6 +185,7 @@ export async function findDashboardByFinca(fincaId, filters = {}) {
          ) AS generated_month
     LEFT JOIN cosecha cc ON date_trunc('month', cc.fecha_cosecha) = generated_month
     LEFT JOIN cultivo cu ON cc.idcultivo = cu.idcultivo AND cu.idfinca = $1
+    WHERE COALESCE(UPPER(cc.estado_registro), '') = 'ACTIVO'
     GROUP BY generated_month
     ORDER BY generated_month;
   `;
@@ -164,7 +201,9 @@ export async function findDashboardByFinca(fincaId, filters = {}) {
            INTERVAL '1 month'
          ) AS generated_month
     LEFT JOIN costo co ON date_trunc('month', co.fecha) = generated_month
-    LEFT JOIN cultivo cu ON co.idcultivo = cu.idcultivo AND cu.idfinca = $1
+    LEFT JOIN cultivo cu ON co.idcultivo = cu.idcultivo
+    WHERE co.idfinca = $1
+      AND COALESCE(UPPER(co.estado_registro), '') = 'ACTIVO'
     GROUP BY generated_month
     ORDER BY generated_month;
   `;
@@ -187,7 +226,8 @@ export async function findDashboardByFinca(fincaId, filters = {}) {
     FROM cosecha cc
     JOIN finca_cultivos fc ON cc.idcultivo = fc.idcultivo
     LEFT JOIN unidades_medidas um ON cc.idunidadmedida = um.idunidadmedida
-    WHERE ${buildDashboardPeriodCondition('cc', 'fecha_cosecha')}
+    WHERE COALESCE(UPPER(cc.estado_registro), '') = 'ACTIVO'
+      AND ${buildDashboardPeriodCondition('cc', 'fecha_cosecha')}
 
     UNION ALL
 
@@ -199,10 +239,12 @@ export async function findDashboardByFinca(fincaId, filters = {}) {
              ' | Monto: ', TO_CHAR(co.valor, 'FM$999G999G999')
            ) AS description
     FROM costo co
-    JOIN finca_cultivos fc ON co.idcultivo = fc.idcultivo
+    LEFT JOIN finca_cultivos fc ON co.idcultivo = fc.idcultivo
     LEFT JOIN subcategoria_costo sc ON co.idsubcategoria = sc.idsubcategoria
     LEFT JOIN categoria_costo cc ON sc.idcategoria = cc.idcategoria
-    WHERE ${buildDashboardPeriodCondition('co', 'fecha')}
+    WHERE COALESCE(UPPER(co.estado_registro), '') = 'ACTIVO'
+      AND ${buildDashboardPeriodCondition('co', 'fecha')}
+      AND (co.idcultivo IS NULL OR fc.idcultivo IS NOT NULL)
 
     UNION ALL
 
@@ -216,7 +258,8 @@ export async function findDashboardByFinca(fincaId, filters = {}) {
     FROM etapa_cultivo ec
     JOIN finca_cultivos fc ON ec.idcultivo = fc.idcultivo
     LEFT JOIN etapas e ON ec.idetapa = e.idetapa
-    WHERE ${buildDashboardPeriodCondition('ec', 'fecha_inicio')}
+    WHERE COALESCE(UPPER(ec.estado_registro), '') = 'ACTIVO'
+      AND ${buildDashboardPeriodCondition('ec', 'fecha_inicio')}
 
     UNION ALL
 
@@ -239,6 +282,7 @@ export async function findDashboardByFinca(fincaId, filters = {}) {
     FROM cultivo c
     LEFT JOIN estado e ON c.idestado = e.idestado
     WHERE c.idfinca = $1
+      AND COALESCE(UPPER(c.estado_registro), '') = 'ACTIVO'
       AND c.fecha_final BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days'
       AND COALESCE(LOWER(e.nombre), '') <> 'finalizado'
     ORDER BY c.fecha_final
@@ -247,14 +291,22 @@ export async function findDashboardByFinca(fincaId, filters = {}) {
 
   const costRiskQuery = `
     WITH costos AS (
-      SELECT idcultivo, SUM(valor) AS total_costos
-      FROM costo
-      GROUP BY idcultivo
+      SELECT co.idcultivo, SUM(co.valor) AS total_costos
+      FROM costo co
+      JOIN cultivo c ON c.idcultivo = co.idcultivo
+      WHERE c.idfinca = $1
+        AND COALESCE(UPPER(c.estado_registro), '') = 'ACTIVO'
+        AND COALESCE(UPPER(co.estado_registro), '') = 'ACTIVO'
+      GROUP BY co.idcultivo
     ),
     ingresos AS (
-      SELECT idcultivo, SUM(cantidad_cosechada * precio_unitario) AS total_ingresos
-      FROM cosecha
-      GROUP BY idcultivo
+      SELECT ce.idcultivo, SUM(ce.cantidad_cosechada * ce.precio_unitario) AS total_ingresos
+      FROM cosecha ce
+      JOIN cultivo c ON c.idcultivo = ce.idcultivo
+      WHERE c.idfinca = $1
+        AND COALESCE(UPPER(c.estado_registro), '') = 'ACTIVO'
+        AND COALESCE(UPPER(ce.estado_registro), '') = 'ACTIVO'
+      GROUP BY ce.idcultivo
     )
     SELECT c.nombre,
            COALESCE(costos.total_costos, 0) AS total_costos,
@@ -282,14 +334,22 @@ export async function findDashboardByFinca(fincaId, filters = {}) {
 
   const highProfitQuery = `
     WITH costos AS (
-      SELECT idcultivo, SUM(valor) AS total_costos
-      FROM costo
-      GROUP BY idcultivo
+      SELECT co.idcultivo, SUM(co.valor) AS total_costos
+      FROM costo co
+      JOIN cultivo c ON c.idcultivo = co.idcultivo
+      WHERE c.idfinca = $1
+        AND COALESCE(UPPER(c.estado_registro), '') = 'ACTIVO'
+        AND COALESCE(UPPER(co.estado_registro), '') = 'ACTIVO'
+      GROUP BY co.idcultivo
     ),
     ingresos AS (
-      SELECT idcultivo, SUM(cantidad_cosechada * precio_unitario) AS total_ingresos
-      FROM cosecha
-      GROUP BY idcultivo
+      SELECT ce.idcultivo, SUM(ce.cantidad_cosechada * ce.precio_unitario) AS total_ingresos
+      FROM cosecha ce
+      JOIN cultivo c ON c.idcultivo = ce.idcultivo
+      WHERE c.idfinca = $1
+        AND COALESCE(UPPER(c.estado_registro), '') = 'ACTIVO'
+        AND COALESCE(UPPER(ce.estado_registro), '') = 'ACTIVO'
+      GROUP BY ce.idcultivo
     )
     SELECT c.nombre,
            COALESCE(costos.total_costos, 0) AS total_costos,
@@ -335,6 +395,7 @@ export async function findDashboardByFinca(fincaId, filters = {}) {
     id: row.id,
     nombre: row.nombre,
     estado: row.estado || 'Sin estado',
+    estado_registro: row.estado_registro || 'ACTIVO',
     fechaInicio: row.fecha_inicio || '--',
     fechaFinal: row.fecha_final || '--',
     ingresos: toNumber(row.ingresos),
