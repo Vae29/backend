@@ -1,14 +1,31 @@
 import dotenv from 'dotenv';
 import pkg from 'pg';
+import { dirname, resolve } from 'path';
+import { fileURLToPath } from 'url';
 
-dotenv.config();
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const envPath = resolve(__dirname, '../.env');
+dotenv.config({ path: envPath });
 
 const { Pool } = pkg;
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-});
+const ssl = process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false;
+
+const poolConfig = process.env.DATABASE_URL
+  ? {
+      connectionString: process.env.DATABASE_URL,
+      ssl,
+    }
+  : {
+      user: process.env.PG_USER,
+      password: process.env.PG_PASSWORD,
+      host: process.env.PG_HOST,
+      port: Number(process.env.PG_PORT || 5432),
+      database: process.env.PG_DATABASE,
+      ssl,
+    };
+
+const pool = new Pool(poolConfig);
 
 pool.on('connect', () => {
   console.log('🔌 PostgreSQL conectado a Supabase');

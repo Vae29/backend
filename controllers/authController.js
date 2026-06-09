@@ -136,10 +136,12 @@ export async function requestPasswordReset(req, res) {
       message: 'Se ha enviado un código de recuperación a tu correo electrónico. Verifica tu bandeja de entrada.',
     })
   } catch (error) {
-    console.error('Error en requestPasswordReset:', error)
+    console.error('Error en requestPasswordReset:', error.stack || error)
     res.status(500).json({
       success: false,
-      message: 'Error en el servidor al enviar el código. Revisa la configuración SMTP.',
+      message:
+        error?.message ||
+        'Error en el servidor al enviar el código. Revisa la configuración SMTP.',
     })
   }
 }

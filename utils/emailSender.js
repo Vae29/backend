@@ -6,33 +6,45 @@ const smtpUser = process.env.SMTP_USER;
 const smtpPass = process.env.SMTP_PASS;
 const smtpFrom = process.env.SMTP_FROM || smtpUser;
 
-if (!smtpHost || !smtpUser || !smtpPass) {
-  console.warn(
-    'SMTP incompleto: define SMTP_HOST, SMTP_USER y SMTP_PASS en tu archivo .env para enviar correos reales.'
-  );
-}
+const smtpConfigComplete = Boolean(smtpHost && smtpUser && smtpPass);
 
 const transporter = nodemailer.createTransport({
   host: smtpHost,
   port: smtpPort,
   secure: smtpPort === 465,
-  auth: {
-    user: smtpUser,
-    pass: smtpPass,
-  },
+  auth: smtpConfigComplete
+    ? {
+        user: smtpUser,
+        pass: smtpPass,
+      }
+    : undefined,
   // Evita que el request de backend quede “colgado” si el SMTP no responde
   connectionTimeout: 15000,
   greetingTimeout: 15000,
 });
 
+if (!smtpConfigComplete) {
+  console.warn(
+    'SMTP incompleto: define SMTP_HOST, SMTP_USER y SMTP_PASS en tu archivo .env para enviar correos reales.'
+  );
+}
+
 try {
-  await transporter.verify();
-  console.log("SMTP OK");
+  if (smtpConfigComplete) {
+    await transporter.verify();
+    console.log('SMTP OK');
+  }
 } catch (error) {
-  console.error("SMTP VERIFY ERROR:", error);
+  console.error('SMTP VERIFY ERROR:', error);
 }
 
 export async function sendResetCodeEmail(to, code) {
+  if (!smtpConfigComplete) {
+    throw new Error(
+      'SMTP no configurado. Define SMTP_HOST, SMTP_USER y SMTP_PASS en tu archivo .env.'
+    );
+  }
+
   const mailOptions = {
     from: smtpFrom,
     to,
