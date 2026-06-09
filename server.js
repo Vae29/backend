@@ -20,33 +20,32 @@ const PORT = process.env.PORT || 3000;
    MIDDLEWARES
 ========================= */
 
-// CORS
+// CORS (robusto para preflight + credenciales)
+const allowedOrigins = new Set([
+  'https://agrogestion-modulo-costos.netlify.app',
+  // por si el navegador manda el origin sin https (raro, pero lo dejamos)
+  'agrogestion-modulo-costos.netlify.app',
+]);
+
 app.use(
   cors({
-    // Refleja el Origin que llegue desde el navegador.
-    // Con credentials=true, esto evita mismatches por variantes exactas del Origin.
-    origin: 'https://agrogestion-modulo-costos.netlify.app',
+    origin: (origin, callback) => {
+      // Si no hay Origin (requests no-browser), permitimos.
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.has(origin)) return callback(null, true);
+      return callback(null, false);
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
+    optionsSuccessStatus: 204,
   })
 );
 
-// Preflight explícito (por compatibilidad con proxys/routers)
-app.options('*', cors({
-  origin: (origin, callback) => {
-    if (!origin) return callback(null, true);
-
-    const allowed = ['https://agrogestion-modulo-costos.netlify.app'];
-    if (allowed.includes(origin)) return callback(null, true);
-    if (origin === 'agrogestion-modulo-costos.netlify.app') return callback(null, true);
-
-    return callback(new Error('Not allowed by CORS'), false);
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-}));
+// Asegura que el preflight SIEMPRE responda desde Express (antes de routers)
+app.options('*', (req, res) => {
+  res.sendStatus(204);
+});
 
 app.use(express.json());
 app.use(cookieParser());
