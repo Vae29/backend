@@ -167,8 +167,18 @@ export async function reportCostos(filters = {}) {
       LIMIT 1000;
     `;
 
-    const result = await client.query(query, params);
-    return result.rows;
+    try {
+      const result = await client.query(query, params);
+      return result.rows;
+    } catch (error) {
+      console.error('reportCostos SQL error:', {
+        filters,
+        query,
+        params,
+        error: error.stack || error,
+      });
+      throw error;
+    }
   } finally {
     client.release();
   }
@@ -195,8 +205,18 @@ export async function reportProduccion(filters = {}) {
       LIMIT 1000;
     `;
 
-    const result = await client.query(query, params);
-    return result.rows;
+    try {
+      const result = await client.query(query, params);
+      return result.rows;
+    } catch (error) {
+      console.error('reportProduccion SQL error:', {
+        filters,
+        query,
+        params,
+        error: error.stack || error,
+      });
+      throw error;
+    }
   } finally {
     client.release();
   }
@@ -226,8 +246,18 @@ export async function reportRentabilidad(filters = {}) {
       LIMIT 1000;
     `;
 
-    const result = await client.query(query, params);
-    return result.rows;
+    try {
+      const result = await client.query(query, params);
+      return result.rows;
+    } catch (error) {
+      console.error('reportRentabilidad SQL error:', {
+        filters,
+        query,
+        params,
+        error: error.stack || error,
+      });
+      throw error;
+    }
   } finally {
     client.release();
   }
@@ -291,8 +321,18 @@ export async function reportByTrabajador(filters = {}) {
       LIMIT 1000;
     `;
 
-    const result = await client.query(query, params);
-    return result.rows;
+    try {
+      const result = await client.query(query, params);
+      return result.rows;
+    } catch (error) {
+      console.error('reportByTrabajador SQL error:', {
+        filters,
+        query,
+        params,
+        error: error.stack || error,
+      });
+      throw error;
+    }
   } finally {
     client.release();
   }
