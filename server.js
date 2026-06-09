@@ -11,6 +11,11 @@ import fincasRoutes from './routes/fincas.js';
 
 const app = express();
 
+app.get('/test', (req, res) => {
+  console.log("TEST HIT");
+  res.json({ ok: true });
+});
+
 // Configurar CORS para permitir cookies
 app.use(
   cors({
