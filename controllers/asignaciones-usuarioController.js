@@ -67,6 +67,7 @@ export async function getCultivosPorFinca(req, res) {
     }
 
     const cultivos = await fetchCultivosPorFinca(Number(fincaId), estado);
+    console.log(`[getCultivosPorFinca] fincaId=${fincaId} estado=${estado} -> rows=${Array.isArray(cultivos) ? cultivos.length : 0}`)
     res.json({
       success: true,
       data: cultivos,

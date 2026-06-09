@@ -63,7 +63,6 @@ export async function fetchCultivosPorFinca(fincaId, estado = 'ACTIVO') {
        ) etapa_activa ON TRUE
        WHERE c.idfinca = $1
          AND c.estado_registro = $2
-         AND f.estado_registro = 'ACTIVO'
        ORDER BY c.nombre`,
       [fincaId, estado]
     );
