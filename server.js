@@ -19,13 +19,11 @@ const PORT = process.env.PORT || 3000;
 /* =========================
    MIDDLEWARES
 ========================= */
-app.get('/test', (req, res) => {
-  res.json({ ok: true });
-});
+
 // CORS
 app.use(
   cors({
-    origin:true,
+    origin:'agrogestion-modulo-costos.netlify.app',
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
