@@ -1,4 +1,3 @@
-
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
@@ -43,7 +42,8 @@ app.use(
 );
 
 // Asegura que el preflight SIEMPRE responda desde Express (antes de routers)
-app.options('*', (req, res) => {
+// Express 5 + path-to-regexp: evitamos string '*' (provoca error en pathToRegexp).
+app.options(/.*/, (req, res) => {
   res.sendStatus(204);
 });
 
@@ -127,3 +127,4 @@ process.once('SIGUSR2', () => {
     process.kill(process.pid, 'SIGUSR2');
   });
 });
+
