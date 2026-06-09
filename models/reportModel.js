@@ -127,8 +127,18 @@ export async function reportByCultivo(filters = {}) {
       ORDER BY cu.nombre;
     `;
 
-    const result = await client.query(query, params);
-    return result.rows;
+    try {
+      const result = await client.query(query, params);
+      return result.rows;
+    } catch (error) {
+      console.error('reportByCultivo SQL error:', {
+        filters,
+        query,
+        params,
+        error: error.stack || error,
+      });
+      throw error;
+    }
   } finally {
     client.release();
   }

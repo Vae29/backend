@@ -7,8 +7,8 @@ export async function getReportFilters(req, res) {
     const filters = await reportModel.getFilters(fincaId);
     return res.json({ success: true, data: filters });
   } catch (error) {
-    console.error('Error en getReportFilters', error);
-    return res.status(500).json({ success: false, error: 'Error obteniendo filtros' });
+    console.error('Error en getReportFilters:', { error: error.stack || error });
+    return res.status(500).json({ success: false, message: 'Error obteniendo filtros' });
   }
 }
 
@@ -23,7 +23,7 @@ export async function postReportQuery(req, res) {
   try {
     const { reportType, filters } = req.body || {};
     if (!reportType) {
-      return res.status(400).json({ success: false, error: 'reportType es requerido' });
+      return res.status(400).json({ success: false, message: 'reportType es requerido' });
     }
 
     let data = [];
@@ -44,13 +44,13 @@ export async function postReportQuery(req, res) {
         data = await reportModel.reportByTrabajador(filters);
         break;
       default:
-        return res.status(400).json({ success: false, error: 'reportType desconocido' });
+        return res.status(400).json({ success: false, message: 'reportType desconocido' });
     }
 
     return sendReportResponse(res, data);
   } catch (error) {
-    console.error('Error en postReportQuery', error);
-    return res.status(500).json({ success: false, error: 'Error ejecutando reporte' });
+    console.error('Error en postReportQuery:', { body: req.body, error: error.stack || error });
+    return res.status(500).json({ success: false, message: 'Error ejecutando reporte' });
   }
 }
 
@@ -60,8 +60,8 @@ export async function postReportPorCultivo(req, res) {
     const data = await reportModel.reportByCultivo(filters);
     return sendReportResponse(res, data);
   } catch (error) {
-    console.error('Error en postReportPorCultivo', error);
-    return res.status(500).json({ success: false, error: 'Error ejecutando reporte por cultivo' });
+    console.error('Error en postReportPorCultivo:', { body: req.body, error: error.stack || error });
+    return res.status(500).json({ success: false, message: 'Error ejecutando reporte por cultivo' });
   }
 }
 
@@ -71,8 +71,8 @@ export async function postReportCostos(req, res) {
     const data = await reportModel.reportCostos(filters);
     return sendReportResponse(res, data);
   } catch (error) {
-    console.error('Error en postReportCostos', error);
-    return res.status(500).json({ success: false, error: 'Error ejecutando reporte de costos' });
+    console.error('Error en postReportCostos:', { body: req.body, error: error.stack || error });
+    return res.status(500).json({ success: false, message: 'Error ejecutando reporte de costos' });
   }
 }
 
@@ -82,8 +82,8 @@ export async function postReportProduccion(req, res) {
     const data = await reportModel.reportProduccion(filters);
     return sendReportResponse(res, data);
   } catch (error) {
-    console.error('Error en postReportProduccion', error);
-    return res.status(500).json({ success: false, error: 'Error ejecutando reporte de producción' });
+    console.error('Error en postReportProduccion:', { body: req.body, error: error.stack || error });
+    return res.status(500).json({ success: false, message: 'Error ejecutando reporte de producción' });
   }
 }
 
@@ -93,8 +93,8 @@ export async function postReportRentabilidad(req, res) {
     const data = await reportModel.reportRentabilidad(filters);
     return sendReportResponse(res, data);
   } catch (error) {
-    console.error('Error en postReportRentabilidad', error);
-    return res.status(500).json({ success: false, error: 'Error ejecutando reporte de rentabilidad' });
+    console.error('Error en postReportRentabilidad:', { body: req.body, error: error.stack || error });
+    return res.status(500).json({ success: false, message: 'Error ejecutando reporte de rentabilidad' });
   }
 }
 
@@ -104,7 +104,7 @@ export async function postReportTrabajador(req, res) {
     const data = await reportModel.reportByTrabajador(filters);
     return sendReportResponse(res, data);
   } catch (error) {
-    console.error('Error en postReportTrabajador', error);
-    return res.status(500).json({ success: false, error: 'Error ejecutando reporte por trabajador' });
+    console.error('Error en postReportTrabajador:', { body: req.body, error: error.stack || error });
+    return res.status(500).json({ success: false, message: 'Error ejecutando reporte por trabajador' });
   }
 }
