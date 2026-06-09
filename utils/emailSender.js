@@ -20,7 +20,11 @@ const transporter = nodemailer.createTransport({
     user: smtpUser,
     pass: smtpPass,
   },
+  // Evita que el request de backend quede “colgado” si el SMTP no responde
+  connectionTimeout: 15000,
+  greetingTimeout: 15000,
 });
+
 
 export async function sendResetCodeEmail(to, code) {
   const mailOptions = {
@@ -31,5 +35,6 @@ export async function sendResetCodeEmail(to, code) {
     html: `<p>Tu código de recuperación es: <strong>${code}</strong></p><p>No compartas este código con nadie. Expira en 5 minutos.</p>`,
   };
 
-  return transporter.sendMail(mailOptions);
+  return transporter.sendMail({ ...mailOptions, timeout: 20000 });
 }
+
