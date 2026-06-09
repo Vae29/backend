@@ -51,7 +51,16 @@ export async function getFilters(fincaId) {
 
 function buildCommonWhere(filters, params) {
   const where = [];
-  const { fincaId, cultivoId, categoriaId, usuarioId, estado, fechaInicio, fechaFin } = filters || {};
+  const {
+    fincaId,
+    cultivoId,
+    categoriaId,
+    usuarioId,
+    estado,
+    estadoId,
+    fechaInicio,
+    fechaFin,
+  } = filters || {};
 
   // Filtro obligatorio: solo registros ACTIVOS de cultivo
   where.push(`COALESCE(UPPER(cu.estado_registro), '') = 'ACTIVO'`);
