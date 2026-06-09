@@ -49,6 +49,10 @@ app.use('/api', asignacionesUsuarioRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/reportes', reportesRoutes);
 
+app.get('/test', (req, res) => {
+  res.json({ ok: true });
+});
+
 const server = app.listen(PORT, () => {
   console.log(`Servidor corriendo en puerto ${PORT}`);
 });
@@ -76,3 +80,4 @@ process.once('SIGUSR2', () => {
     process.kill(process.pid, 'SIGUSR2');
   });
 });
+
