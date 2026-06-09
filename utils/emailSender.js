@@ -25,6 +25,12 @@ const transporter = nodemailer.createTransport({
   greetingTimeout: 15000,
 });
 
+try {
+  await transporter.verify();
+  console.log("SMTP OK");
+} catch (error) {
+  console.error("SMTP VERIFY ERROR:", error);
+}
 
 export async function sendResetCodeEmail(to, code) {
   const mailOptions = {
