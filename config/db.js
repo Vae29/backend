@@ -11,7 +11,21 @@ const { Pool } = pkg;
 
 const ssl = process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false;
 
-const poolConfig = process.env.DATABASE_URL
+const usingDatabaseUrl = Boolean(process.env.DATABASE_URL);
+const usingPgVars = Boolean(
+  process.env.PG_USER &&
+    process.env.PG_PASSWORD &&
+    process.env.PG_HOST &&
+    process.env.PG_DATABASE
+);
+
+if (!usingDatabaseUrl && !usingPgVars) {
+  console.error(
+    'FATAL: No se encontró configuración válida de PostgreSQL. Define DATABASE_URL o PG_USER/PG_PASSWORD/PG_HOST/PG_DATABASE.'
+  );
+}
+
+const poolConfig = usingDatabaseUrl
   ? {
       connectionString: process.env.DATABASE_URL,
       ssl,
@@ -26,6 +40,10 @@ const poolConfig = process.env.DATABASE_URL
     };
 
 const pool = new Pool(poolConfig);
+
+console.log(
+  `PostgreSQL connection mode: ${usingDatabaseUrl ? 'DATABASE_URL' : usingPgVars ? 'PG_* variables' : 'NONE'}`
+);
 
 pool.on('connect', () => {
   console.log('🔌 PostgreSQL conectado a Supabase');

@@ -15,24 +15,26 @@ const app = express();
 
 const PORT = process.env.PORT || 3000;
 
+const allowedOrigins = [
+  process.env.CLIENT_ORIGIN,
+  'https://agrogestion-modulo-costos.netlify.app',
+].filter(Boolean);
+
 /* =========================
    CORS CONFIGURADO BIEN
 ========================= */
 
 app.use(cors({
-  origin: [
-    'https://agrogestion-modulo-costos.netlify.app'
-  ],
+  origin: allowedOrigins,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
 // Fallback CORS headers por si el proxy/modo de despliegue elimina cabeceras preflight
 app.use((req, res, next) => {
-  const allowed = ['https://agrogestion-modulo-costos.netlify.app'];
   const origin = req.headers.origin;
-  if (allowed.includes(origin)) {
+  if (allowedOrigins.includes(origin)) {
     res.header('Access-Control-Allow-Origin', origin);
   }
   res.header('Access-Control-Allow-Credentials', 'true');
