@@ -23,23 +23,9 @@ const PORT = process.env.PORT || 3000;
 // CORS
 app.use(
   cors({
-    origin: (origin, callback) => {
-      // Permitir requests sin Origin (p.ej. tools, cURL)
-      if (!origin) return callback(null, true);
-
-      // Permitir el frontend desplegado en Netlify (y variantes con/ sin subdominio)
-      const allowed = [
-        'https://agrogestion-modulo-costos.netlify.app',
-        // Si Netlify usa otro dominio en tu caso, agrégalo aquí
-      ];
-
-      if (allowed.includes(origin)) return callback(null, true);
-
-      // Permitir también el dominio sin esquema (por compatibilidad con configs previas)
-      if (origin === 'agrogestion-modulo-costos.netlify.app') return callback(null, true);
-
-      return callback(new Error('Not allowed by CORS'), false);
-    },
+    // Refleja el Origin que llegue desde el navegador.
+    // Con credentials=true, esto evita mismatches por variantes exactas del Origin.
+    origin: true,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
