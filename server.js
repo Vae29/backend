@@ -33,7 +33,7 @@ app.use(
 );
 
 // Preflight explícito (por compatibilidad con proxys/routers)
-app.options('*', cors({
+const preflightCors = cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
 
@@ -46,7 +46,14 @@ app.options('*', cors({
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-}));
+});
+
+app.use((req, res, next) => {
+  if (req.method === 'OPTIONS') {
+    return preflightCors(req, res, next);
+  }
+  next();
+});
 
 app.use(express.json());
 app.use(cookieParser());
