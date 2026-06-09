@@ -19,7 +19,9 @@ const PORT = process.env.PORT || 3000;
 /* =========================
    MIDDLEWARES
 ========================= */
-
+app.get('/test', (req, res) => {
+  res.json({ ok: true });
+});
 // CORS
 app.use(
   cors({
