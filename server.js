@@ -46,6 +46,22 @@ app.use(
   })
 );
 
+// Preflight explícito (por compatibilidad con proxys/routers)
+app.options('*', cors({
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+
+    const allowed = ['https://agrogestion-modulo-costos.netlify.app'];
+    if (allowed.includes(origin)) return callback(null, true);
+    if (origin === 'agrogestion-modulo-costos.netlify.app') return callback(null, true);
+
+    return callback(new Error('Not allowed by CORS'), false);
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
+
 app.use(express.json());
 app.use(cookieParser());
 
