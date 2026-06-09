@@ -1,4 +1,3 @@
-
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
@@ -17,43 +16,21 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 /* =========================
-   MIDDLEWARES
+   CORS CONFIGURADO BIEN
 ========================= */
 
-// CORS
-app.use(
-  cors({
-    // Refleja el Origin que llegue desde el navegador.
-    // Con credentials=true, esto evita mismatches por variantes exactas del Origin.
-    origin: true,
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-  })
-);
-
-// Preflight explícito (por compatibilidad con proxys/routers)
-const preflightCors = cors({
-  origin: (origin, callback) => {
-    if (!origin) return callback(null, true);
-
-    const allowed = ['https://agrogestion-modulo-costos.netlify.app'];
-    if (allowed.includes(origin)) return callback(null, true);
-    if (origin === 'agrogestion-modulo-costos.netlify.app') return callback(null, true);
-
-    return callback(new Error('Not allowed by CORS'), false);
-  },
+app.use(cors({
+  origin: [
+    'https://agrogestion-modulo-costos.netlify.app'
+  ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-});
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 
-app.use((req, res, next) => {
-  if (req.method === 'OPTIONS') {
-    return preflightCors(req, res, next);
-  }
-  next();
-});
+/* =========================
+   MIDDLEWARES
+========================= */
 
 app.use(express.json());
 app.use(cookieParser());
@@ -84,6 +61,7 @@ app.use('/api/reportes', reportesRoutes);
 /* =========================
    DB TEST
 ========================= */
+
 testConnection();
 
 /* =========================
