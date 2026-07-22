@@ -1,5 +1,6 @@
 ﻿import { fetchAllFincas, fetchCultivosEnProceso, fetchCultivosPorFinca, fetchCultivoDetalleById, fetchCostosPorFinca, fetchCategoriasCosto, fetchSubcategoriasPorCategoria, fetchEstadosPago, fetchEtapaEnProcesoPorCultivo, validateCultivoCanAddCosto, validateActiveEtapaForCultivo, createCosto, updateCosto, deleteCostoById, fetchTiposCultivo, fetchEstados, fetchEstadoById, createCultivo, updateCultivo, fetchCultivosPorUsuario, fetchFincasPorUsuario, deleteOrDeactivateEtapaById, deleteCultivoById, changeCultivoState, changeCostoState, changeEtapaState, changeCosechaState, fetchEtapasPorCultivo, fetchAllEtapasCatalog, finalizeEtapaEnProceso, createEtapaParaCultivo, updateEtapaParaCultivo, fetchCosechasPorCultivo, fetchUnidadesMedida, fetchTiposPrecio, validateCultivoCanAddCosecha, createCosecha, updateCosecha, deleteCosechaById } from '../models/asinaciones-usuarioModel.js';
 import { parseCurrencyValue } from '../utils/currency.js'
+import { registrarAuditoria, contextoAuditoria } from '../models/auditoriaModel.js';
 
 export async function getFincas(req, res) {
   try {
@@ -108,6 +109,11 @@ export async function postCultivo(req, res) {
     }
 
     const cultivo = await createCultivo({ nombre: nombre.trim(), idtipocultivo, idfinca });
+    await registrarAuditoria(contextoAuditoria(req, {
+      modulo: 'Cultivos', accion: 'CREAR_CULTIVO', descripcion: 'Cultivo creado',
+      tablaAfectada: 'cultivo', registroId: cultivo?.id,
+      nuevo: { nombre: nombre.trim(), idtipocultivo, idfinca },
+    }));
     res.status(201).json({
       success: true,
       data: cultivo,
@@ -354,6 +360,12 @@ export async function postCosecha(req, res) {
       idtipo_precio,
     })
 
+    await registrarAuditoria(contextoAuditoria(req, {
+      modulo: 'Cultivos', accion: 'CREAR_COSECHA', descripcion: 'Cosecha creada',
+      tablaAfectada: 'cosecha', registroId: cosecha?.id,
+      nuevo: { idcultivo: cultivoId, cantidad, idunidadmedida, precio, idtipo_precio },
+    }));
+
     res.status(201).json({ success: true, data: cosecha })
   } catch (error) {
     console.error('Error en postCosecha:', error)
@@ -395,6 +407,12 @@ export async function putCosecha(req, res) {
       return res.status(404).json({ success: false, message: 'Cosecha no encontrada' })
     }
 
+    await registrarAuditoria(contextoAuditoria(req, {
+      modulo: 'Cultivos', accion: 'EDITAR_COSECHA', descripcion: 'Cosecha actualizada',
+      tablaAfectada: 'cosecha', registroId: id,
+      nuevo: { cantidad, idunidadmedida, precio, idtipo_precio },
+    }));
+
     res.json({ success: true, data: updated })
   } catch (error) {
     console.error('Error en putCosecha:', error)
@@ -413,6 +431,11 @@ export async function deleteCosecha(req, res) {
     if (!deleted) {
       return res.status(404).json({ success: false, message: 'Cosecha no encontrada' })
     }
+
+    await registrarAuditoria(contextoAuditoria(req, {
+      modulo: 'Cultivos', accion: 'ELIMINAR_COSECHA', descripcion: 'Cosecha eliminada',
+      tablaAfectada: 'cosecha', registroId: id,
+    }));
 
     res.json({ success: true, data: deleted })
   } catch (error) {
@@ -473,6 +496,12 @@ export async function postEtapaPorCultivo(req, res) {
 
     const created = await createEtapaParaCultivo({ idcultivo: cultivoId, idetapa, descripcion })
 
+    await registrarAuditoria(contextoAuditoria(req, {
+      modulo: 'Cultivos', accion: 'CREAR_ETAPA', descripcion: 'Etapa agregada al cultivo',
+      tablaAfectada: 'etapa_cultivo', registroId: created?.id,
+      nuevo: { idcultivo: cultivoId, idetapa, descripcion, forceFinalize: Boolean(forceFinalize) },
+    }));
+
     res.status(201).json({ success: true, data: { finalized, created } })
   } catch (error) {
     console.error('Error en postEtapaPorCultivo:', error)
@@ -505,6 +534,12 @@ export async function putEtapaPorCultivo(req, res) {
       return res.status(404).json({ success: false, message: 'Etapa no encontrada' })
     }
 
+    await registrarAuditoria(contextoAuditoria(req, {
+      modulo: 'Cultivos', accion: 'EDITAR_ETAPA', descripcion: 'Etapa del cultivo actualizada',
+      tablaAfectada: 'etapa_cultivo', registroId: etapaId,
+      nuevo: { idetapa, descripcion, idestado, forceFinalize: Boolean(forceFinalize), forceEnProceso: Boolean(forceEnProceso) },
+    }));
+
     res.json({ success: true, data: updated })
   } catch (error) {
     console.error('Error en putEtapaPorCultivo:', error)
@@ -523,6 +558,13 @@ export async function deleteEtapaPorCultivo(req, res) {
     if (!result || !result.record) {
       return res.status(404).json({ success: false, message: 'Etapa no encontrada' })
     }
+
+    await registrarAuditoria(contextoAuditoria(req, {
+      modulo: 'Cultivos', accion: result.action === 'deactivated' ? 'ANULAR_ETAPA' : 'ELIMINAR_ETAPA',
+      descripcion: result.action === 'deactivated' ? 'Etapa anulada por tener costos asociados' : 'Etapa eliminada',
+      tablaAfectada: 'etapa_cultivo', registroId: etapaCultivoId,
+      metadatos: { action: result.action, costCount: result.costCount },
+    }));
 
     const message = result.action === 'deactivated'
       ? 'La etapa tiene costos asociados. Se ha desactivado en lugar de eliminarse permanentemente.'
@@ -628,6 +670,12 @@ export async function postCosto(req, res) {
       idestado_pago: parsedIdestadoPago,
     })
 
+    await registrarAuditoria(contextoAuditoria(req, {
+      modulo: 'Costos', accion: 'REGISTRAR_COSTO', descripcion: 'Costo registrado',
+      tablaAfectada: 'costo', registroId: costo?.id,
+      nuevo: { descripcion, valor: parsedValor, idcultivo: parsedIdcultivo, idetapa_cultivo, idsubcategoria: parsedIdsubcategoria, idfinca: parsedIdfinca, idestado_pago: parsedIdestadoPago },
+    }));
+
     res.status(201).json({
       success: true,
       data: costo,
@@ -684,6 +732,12 @@ export async function putCosto(req, res) {
       return res.status(404).json({ success: false, message: 'Costo no encontrado' })
     }
 
+    await registrarAuditoria(contextoAuditoria(req, {
+      modulo: 'Costos', accion: 'EDITAR_COSTO', descripcion: 'Costo actualizado',
+      tablaAfectada: 'costo', registroId: idcosto,
+      nuevo: { descripcion, valor: parsedValor, idsubcategoria: parsedIdsubcategoria, idestado_pago: parsedIdestadoPago },
+    }));
+
     res.json({ success: true, data: updatedCosto })
   } catch (error) {
     console.error('Error en putCosto:', error)
@@ -712,6 +766,11 @@ export async function deleteCosto(req, res) {
     if (!deleted) {
       return res.status(404).json({ success: false, message: 'Costo no encontrado' })
     }
+
+    await registrarAuditoria(contextoAuditoria(req, {
+      modulo: 'Costos', accion: 'ELIMINAR_COSTO', descripcion: 'Costo eliminado',
+      tablaAfectada: 'costo', registroId: idcosto,
+    }));
 
     res.json({ success: true, data: deleted })
   } catch (error) {
@@ -747,6 +806,12 @@ export async function putCultivo(req, res) {
       fecha_final,
     });
 
+    await registrarAuditoria(contextoAuditoria(req, {
+      modulo: 'Cultivos', accion: 'EDITAR_CULTIVO', descripcion: 'Cultivo actualizado',
+      tablaAfectada: 'cultivo', registroId: cultivoId,
+      nuevo: { nombre: nombre.trim(), idtipocultivo: Number(idtipocultivo), idestado: Number(idestado), fecha_inicio: fecha_inicio || null, fecha_final },
+    }));
+
     res.json({ success: true, data: updated });
   } catch (error) {
     console.error('Error en putCultivo:', error);
@@ -766,6 +831,11 @@ export async function deleteCultivo(req, res) {
     if (!deleted) {
       return res.status(404).json({ success: false, message: 'Cultivo no encontrado' });
     }
+
+    await registrarAuditoria(contextoAuditoria(req, {
+      modulo: 'Cultivos', accion: 'ELIMINAR_CULTIVO', descripcion: 'Cultivo archivado/eliminado',
+      tablaAfectada: 'cultivo', registroId: cultivoId,
+    }));
 
     res.json({ success: true, data: deleted });
   } catch (error) {
@@ -799,6 +869,11 @@ export async function changeCultivoStateController(req, res) {
     if (!updated) {
       return res.status(404).json({ success: false, message: 'Cultivo no encontrado' });
     }
+
+    await registrarAuditoria(contextoAuditoria(req, {
+      modulo: 'Cultivos', accion: 'CAMBIAR_ESTADO_CULTIVO', descripcion: motivo.trim(),
+      tablaAfectada: 'cultivo', registroId: cultivoId, nuevo: { estado: nuevoEstado },
+    }));
 
     res.json({
       success: true,
@@ -837,6 +912,11 @@ export async function changeCostoStateController(req, res) {
       return res.status(404).json({ success: false, message: 'Costo no encontrado' });
     }
 
+    await registrarAuditoria(contextoAuditoria(req, {
+      modulo: 'Costos', accion: nuevoEstado === 'ANULADO' ? 'ANULAR_COSTO' : 'ACTIVAR_COSTO', descripcion: motivo.trim(),
+      tablaAfectada: 'costo', registroId: costoId, nuevo: { estado: nuevoEstado },
+    }));
+
     res.json({ success: true, message: 'Estado del costo actualizado exitosamente', data: updated });
   } catch (error) {
     console.error('Error en changeCostoStateController:', error);
@@ -869,6 +949,11 @@ export async function changeEtapaStateController(req, res) {
     if (!updated) {
       return res.status(404).json({ success: false, message: 'Etapa no encontrada' });
     }
+
+    await registrarAuditoria(contextoAuditoria(req, {
+      modulo: 'Cultivos', accion: nuevoEstado === 'ANULADO' ? 'ANULAR_ETAPA' : 'ACTIVAR_ETAPA', descripcion: motivo.trim(),
+      tablaAfectada: 'etapa_cultivo', registroId: etapaId, nuevo: { estado: nuevoEstado },
+    }));
 
     res.json({ success: true, message: 'Estado de la etapa actualizado exitosamente', data: updated });
   } catch (error) {

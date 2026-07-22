@@ -1,4 +1,5 @@
 import * as fincaModel from '../models/fincaModel.js';
+import { registrarAuditoria, contextoAuditoria } from '../models/auditoriaModel.js';
 
 export async function getFincas(req, res) {
   try {
@@ -20,6 +21,14 @@ export async function createFinca(req, res) {
     }
 
     const newFinca = await fincaModel.createFinca(nombre.trim(), ubicacion.trim());
+    await registrarAuditoria(contextoAuditoria(req, {
+      modulo: 'Fincas',
+      accion: 'CREAR_FINCA',
+      descripcion: 'Finca creada',
+      tablaAfectada: 'finca',
+      registroId: newFinca?.id,
+      nuevo: { nombre: nombre.trim(), ubicacion: ubicacion.trim() },
+    }));
     return res.status(201).json(newFinca);
   } catch (error) {
     console.error(error);
@@ -42,6 +51,15 @@ export async function updateFinca(req, res) {
     if (!updatedFinca) {
       return res.status(404).json({ error: 'Finca no encontrada' });
     }
+
+    await registrarAuditoria(contextoAuditoria(req, {
+      modulo: 'Fincas',
+      accion: 'EDITAR_FINCA',
+      descripcion: 'Finca actualizada',
+      tablaAfectada: 'finca',
+      registroId: fincaId,
+      nuevo: { nombre: nombre.trim(), ubicacion: ubicacion.trim() },
+    }));
 
     return res.json(updatedFinca);
   } catch (error) {
@@ -74,6 +92,15 @@ export async function changeFincaState(req, res) {
       return res.status(404).json({ error: 'Finca no encontrada' });
     }
 
+    await registrarAuditoria(contextoAuditoria(req, {
+      modulo: 'Fincas',
+      accion: nuevoEstado === 'ACTIVO' ? 'RESTAURAR_FINCA' : 'ARCHIVAR_FINCA',
+      descripcion: motivo.trim(),
+      tablaAfectada: 'finca',
+      registroId: fincaId,
+      nuevo: { estado: nuevoEstado },
+    }));
+
     return res.json(updatedFinca);
   } catch (error) {
     console.error(error);
@@ -93,6 +120,14 @@ export async function deleteFinca(req, res) {
     if (!deletedFinca) {
       return res.status(404).json({ error: 'Finca no encontrada' });
     }
+
+    await registrarAuditoria(contextoAuditoria(req, {
+      modulo: 'Fincas',
+      accion: 'ELIMINAR_FINCA',
+      descripcion: 'Finca eliminada',
+      tablaAfectada: 'finca',
+      registroId: fincaId,
+    }));
 
     return res.json({ message: 'Finca eliminada correctamente' });
   } catch (error) {

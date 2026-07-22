@@ -1,4 +1,14 @@
 import * as reportModel from '../models/reportModel.js';
+import { registrarAuditoria, contextoAuditoria } from '../models/auditoriaModel.js';
+
+async function auditarReporte(req, reportType, filters, data) {
+  await registrarAuditoria(contextoAuditoria(req, {
+    modulo: 'Reportes',
+    accion: 'EXPORTAR_REPORTE',
+    descripcion: `Reporte ${reportType} generado`,
+    metadatos: { reportType, filters, cantidadResultados: Array.isArray(data) ? data.length : 0 },
+  }));
+}
 
 // Controlador para devolver opciones de filtros dinámicos
 export async function getReportFilters(req, res) {
@@ -10,6 +20,21 @@ export async function getReportFilters(req, res) {
     console.error('Error en getReportFilters', error);
     return res.status(500).json({ success: false, error: 'Error obteniendo filtros' });
   }
+}
+
+export async function postAuditReportExport(req, res) {
+  const { reportType, formato, filtros } = req.body || {};
+  if (!reportType || !['PDF', 'EXCEL'].includes(String(formato).toUpperCase())) {
+    return res.status(400).json({ success: false, error: 'reportType y formato válido son requeridos' });
+  }
+
+  await registrarAuditoria(contextoAuditoria(req, {
+    modulo: 'Reportes',
+    accion: 'EXPORTAR_REPORTE',
+    descripcion: `Reporte ${reportType} exportado a ${String(formato).toUpperCase()}`,
+    metadatos: { reportType, formato: String(formato).toUpperCase(), filtros },
+  }));
+  return res.json({ success: true });
 }
 
 function sendReportResponse(res, data) {
@@ -47,6 +72,8 @@ export async function postReportQuery(req, res) {
         return res.status(400).json({ success: false, error: 'reportType desconocido' });
     }
 
+    await auditarReporte(req, reportType, filters, data);
+
     return sendReportResponse(res, data);
   } catch (error) {
     console.error('Error en postReportQuery', error);
@@ -58,6 +85,7 @@ export async function postReportPorCultivo(req, res) {
   try {
     const filters = req.body || {};
     const data = await reportModel.reportByCultivo(filters);
+    await auditarReporte(req, 'por-cultivo', filters, data);
     return sendReportResponse(res, data);
   } catch (error) {
     console.error('Error en postReportPorCultivo', error);
@@ -69,6 +97,7 @@ export async function postReportCostos(req, res) {
   try {
     const filters = req.body || {};
     const data = await reportModel.reportCostos(filters);
+    await auditarReporte(req, 'costos', filters, data);
     return sendReportResponse(res, data);
   } catch (error) {
     console.error('Error en postReportCostos', error);
@@ -80,6 +109,7 @@ export async function postReportProduccion(req, res) {
   try {
     const filters = req.body || {};
     const data = await reportModel.reportProduccion(filters);
+    await auditarReporte(req, 'produccion', filters, data);
     return sendReportResponse(res, data);
   } catch (error) {
     console.error('Error en postReportProduccion', error);
@@ -91,6 +121,7 @@ export async function postReportRentabilidad(req, res) {
   try {
     const filters = req.body || {};
     const data = await reportModel.reportRentabilidad(filters);
+    await auditarReporte(req, 'rentabilidad', filters, data);
     return sendReportResponse(res, data);
   } catch (error) {
     console.error('Error en postReportRentabilidad', error);
@@ -102,6 +133,7 @@ export async function postReportTrabajador(req, res) {
   try {
     const filters = req.body || {};
     const data = await reportModel.reportByTrabajador(filters);
+    await auditarReporte(req, 'trabajador', filters, data);
     return sendReportResponse(res, data);
   } catch (error) {
     console.error('Error en postReportTrabajador', error);

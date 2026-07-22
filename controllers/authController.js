@@ -14,6 +14,7 @@ import {
 } from '../models/authModel.js';
 import { crearSesion, verificarSesion, cerrarSesion, obtenerSesionesActivas } from '../models/sesionesModel.js';
 import { JWT_CONFIG } from '../config/jwt.js';
+import { registrarAuditoria, contextoAuditoria } from '../models/auditoriaModel.js';
 
 const generate4DigitCode = () => String(Math.floor(1000 + Math.random() * 9000));
 
@@ -57,6 +58,15 @@ export async function login(req, res) {
     const usuario = await findUserByCredentials(email, password);
 
     if (!usuario) {
+      const usuarioIdentificado = await findUserByEmail(email);
+      if (usuarioIdentificado) {
+        await registrarAuditoria(contextoAuditoria(req, {
+          usuarioId: usuarioIdentificado.id,
+          modulo: 'Autenticación',
+          accion: 'INICIO_SESION_FALLIDO',
+          descripcion: 'Intento de inicio de sesión con credenciales no válidas',
+        }));
+      }
       return res.status(401).json({
         success: false,
         message: 'Credenciales no válidas',
@@ -75,6 +85,15 @@ export async function login(req, res) {
 
     // Guardar sesión en la BD
     const sesion = await crearSesion(usuario.id, refreshToken, userAgent, ipAddress);
+
+    await registrarAuditoria(contextoAuditoria(req, {
+      usuarioId: usuario.id,
+      modulo: 'Autenticación',
+      accion: 'INICIO_SESION',
+      descripcion: 'Inicio de sesión exitoso',
+      tablaAfectada: 'sesiones',
+      registroId: sesion?.id_sesion,
+    }));
 
     // Enviar refresh token en HttpOnly Cookie
     res.cookie('refreshToken', refreshToken, {
@@ -254,6 +273,15 @@ export async function createUserController(req, res) {
       cultivos,
     })
 
+    await registrarAuditoria(contextoAuditoria(req, {
+      modulo: 'Usuarios',
+      accion: 'CREAR_USUARIO',
+      descripcion: 'Usuario creado',
+      tablaAfectada: 'usuario',
+      registroId: nuevoUsuario.id,
+      nuevo: { nombre: cleanNombre, apellidos: cleanApellidos, correo: cleanCorreo, rol, fincas, cultivos },
+    }));
+
     const userResponse = {
       id: nuevoUsuario.id,
       nombre: nuevoUsuario.primer_nombre,
@@ -324,6 +352,25 @@ export async function updateUserController(req, res) {
       })
     }
 
+    await registrarAuditoria(contextoAuditoria(req, {
+      modulo: 'Usuarios',
+      accion: 'EDITAR_USUARIO',
+      descripcion: 'Usuario actualizado',
+      tablaAfectada: 'usuario',
+      registroId: updatedUser.id,
+      nuevo: { nombre: cleanNombre, apellidos: cleanApellidos, correo: cleanCorreo, rol, fincas, cultivos },
+    }));
+    if (Number(rol) === 1 || Number(rol) === 2) {
+      await registrarAuditoria(contextoAuditoria(req, {
+        modulo: 'Usuarios',
+        accion: 'CAMBIAR_ROL',
+        descripcion: 'Rol de usuario actualizado',
+        tablaAfectada: 'usuario',
+        registroId: updatedUser.id,
+        nuevo: { rol },
+      }));
+    }
+
     const userResponse = {
       id: updatedUser.id,
       nombre: updatedUser.primer_nombre,
@@ -360,6 +407,14 @@ export async function deleteUserController(req, res) {
         message: 'Usuario no encontrado',
       })
     }
+
+    await registrarAuditoria(contextoAuditoria(req, {
+      modulo: 'Usuarios',
+      accion: 'ELIMINAR_USUARIO',
+      descripcion: 'Usuario eliminado',
+      tablaAfectada: 'usuario',
+      registroId: deletedUser.id,
+    }));
 
     res.json({
       success: true,
@@ -407,6 +462,15 @@ export async function changeUserStateController(req, res) {
         message: 'Usuario no encontrado',
       });
     }
+
+    await registrarAuditoria(contextoAuditoria(req, {
+      modulo: 'Usuarios',
+      accion: nuevoEstado === 'ACTIVO' ? 'ACTIVAR_USUARIO' : 'DESACTIVAR_USUARIO',
+      descripcion: motivo.trim(),
+      tablaAfectada: 'usuario',
+      registroId: updatedUser.id,
+      nuevo: { estado: nuevoEstado },
+    }));
 
     res.json({
       success: true,
@@ -538,6 +602,14 @@ export async function logout(req, res) {
 
         if (sesion) {
           await cerrarSesion(sesion.id_sesion);
+          await registrarAuditoria(contextoAuditoria(req, {
+            usuarioId: decoded.id,
+            modulo: 'Autenticación',
+            accion: 'CIERRE_SESION',
+            descripcion: 'Cierre de sesión exitoso',
+            tablaAfectada: 'sesiones',
+            registroId: sesion.id_sesion,
+          }));
         }
       } catch (error) {
         console.error('Error al cerrar sesión en BD:', error);
