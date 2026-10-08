@@ -1,27 +1,64 @@
 import jwt from 'jsonwebtoken';
+import { JWT_CONFIG } from '../config/jwt.js';
 
-const secret = process.env.JWT_SECRET || 'dev-secret';
-
+// Middleware para verificar Access Token
 export function verificarAccessToken(req, res, next) {
-  const authHeader = req.headers.authorization || '';
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : req.cookies?.accessToken || null;
-
-  if (!token) {
-    req.user = null;
-    return next();
-  }
-
   try {
-    req.user = jwt.verify(token, secret);
-    return next();
+    const authHeader = req.headers.authorization;
+    
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({
+        success: false,
+        message: 'Token no proporcionado',
+      });
+    }
+
+    const token = authHeader.substring(7); // Quitar "Bearer "
+    
+    const decoded = jwt.verify(token, JWT_CONFIG.ACCESS_TOKEN_SECRET);
+    
+    // Guardar datos del usuario en el request para usarlos después
+    req.user = {
+      id: decoded.id,
+      email: decoded.email,
+      role: decoded.role,
+    };
+    
+    next();
   } catch (error) {
-    return res.status(401).json({ success: false, message: 'Token inválido' });
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({
+        success: false,
+        message: 'Token expirado',
+        code: 'TOKEN_EXPIRED',
+      });
+    }
+    
+    return res.status(401).json({
+      success: false,
+      message: 'Token inválido',
+    });
   }
 }
 
+// Middleware para verificar que sea Admin
 export function verificarAdmin(req, res, next) {
-  if (!req.user || (req.user.role !== 'admin' && req.user.role !== 'administrador')) {
-    return res.status(403).json({ success: false, message: 'No autorizado' });
+  if (req.user.role !== 'admin' && req.user.role !== 'administrador' && req.user.role !== '1') {
+    return res.status(403).json({
+      success: false,
+      message: 'No tienes permiso para acceder a este recurso',
+    });
   }
-  return next();
+  next();
+}
+
+// Middleware para verificar que sea Worker
+export function verificarWorker(req, res, next) {
+  if (req.user.role !== 'worker' && req.user.role !== 'trabajador' && req.user.role !== '2') {
+    return res.status(403).json({
+      success: false,
+      message: 'No tienes permiso para acceder a este recurso',
+    });
+  }
+  next();
 }

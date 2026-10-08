@@ -15,34 +15,19 @@ const app = express();
 
 const PORT = process.env.PORT || 3000;
 
-/* =========================
-   CORS CONFIGURADO BIEN
-========================= */
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  process.env.frontend_url,
+  process.env.CLIENT_ORIGIN,
+  'https://agrogestion-modulo-costos.netlify.app',
+].filter(Boolean);
 
 app.use(cors({
-  origin: [
-    'https://agrogestion-modulo-costos.netlify.app'
-  ],
+  origin: allowedOrigins,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
-
-// Fallback CORS headers por si el proxy/modo de despliegue elimina cabeceras preflight
-app.use((req, res, next) => {
-  const allowed = ['https://agrogestion-modulo-costos.netlify.app'];
-  const origin = req.headers.origin;
-  if (allowed.includes(origin)) {
-    res.header('Access-Control-Allow-Origin', origin);
-  }
-  res.header('Access-Control-Allow-Credentials', 'true');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') {
-    res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,PATCH,OPTIONS');
-    return res.sendStatus(204);
-  }
-  next();
-});
 
 /* =========================
    MIDDLEWARES
