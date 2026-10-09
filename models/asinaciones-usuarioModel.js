@@ -117,11 +117,12 @@ export async function fetchFincasPorUsuario(idUsuario) {
       `SELECT
          f.idfinca AS id,
          f.nombre,
-         f.ubicacion
+         f.ubicacion,
+         f.estado_registro AS estado_registro
        FROM finca f
        INNER JOIN usuario_finca uf ON uf.idfinca = f.idfinca
        WHERE uf.id_usuario = $1
-         AND f.estado_registro = 'ACTIVO'
+         AND UPPER(TRIM(f.estado_registro)) = 'ACTIVO'
        ORDER BY f.nombre`,
       [idUsuario]
     )
