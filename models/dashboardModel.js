@@ -40,6 +40,52 @@ const dashboardSeriesEnd = (monthAlias, yearAlias) => `
   )
 `;
 
+export function buildProductionTrendQuery() {
+  return `
+    WITH params AS (SELECT $2::int AS month_num, $3::int AS year_num)
+    SELECT TO_CHAR(generated_month, 'Mon YYYY') AS label,
+           COALESCE(SUM(cc.cantidad_cosechada), 0) AS total_produccion
+    FROM params,
+         GENERATE_SERIES(
+           (${dashboardSeriesStart('params.month_num', 'params.year_num')}),
+           (${dashboardSeriesEnd('params.month_num', 'params.year_num')}),
+           INTERVAL '1 month'
+         ) AS generated_month
+    LEFT JOIN cosecha cc
+      ON date_trunc('month', cc.fecha_cosecha) = generated_month
+      AND COALESCE(UPPER(cc.estado_registro), '') = 'ACTIVO'
+      AND EXISTS (
+        SELECT 1
+        FROM cultivo cultivo_finca
+        WHERE cultivo_finca.idcultivo = cc.idcultivo
+          AND cultivo_finca.idfinca = $1
+          AND COALESCE(UPPER(cultivo_finca.estado_registro), '') = 'ACTIVO'
+      )
+    GROUP BY generated_month
+    ORDER BY generated_month;
+  `;
+}
+
+export function buildCostTrendQuery() {
+  return `
+    WITH params AS (SELECT $2::int AS month_num, $3::int AS year_num)
+    SELECT TO_CHAR(generated_month, 'Mon YYYY') AS label,
+           COALESCE(SUM(co.valor), 0) AS total_costos
+    FROM params,
+         GENERATE_SERIES(
+           (${dashboardSeriesStart('params.month_num', 'params.year_num')}),
+           (${dashboardSeriesEnd('params.month_num', 'params.year_num')}),
+           INTERVAL '1 month'
+         ) AS generated_month
+    LEFT JOIN costo co
+      ON date_trunc('month', co.fecha) = generated_month
+      AND co.idfinca = $1
+      AND COALESCE(UPPER(co.estado_registro), '') = 'ACTIVO'
+    GROUP BY generated_month
+    ORDER BY generated_month;
+  `;
+}
+
 export async function findDashboardByFinca(fincaId, filters = {}) {
   const { month = null, year = null } = filters;
   const summaryQuery = `
@@ -173,40 +219,8 @@ export async function findDashboardByFinca(fincaId, filters = {}) {
       ORDER BY total DESC, cc.nombre;
   `;
 
-  const productionTrendQuery = `
-    WITH params AS (SELECT $2::int AS month_num, $3::int AS year_num)
-    SELECT TO_CHAR(generated_month, 'Mon YYYY') AS label,
-           COALESCE(SUM(cc.cantidad_cosechada), 0) AS total_produccion
-    FROM params,
-         GENERATE_SERIES(
-           (${dashboardSeriesStart('params.month_num', 'params.year_num')}),
-           (${dashboardSeriesEnd('params.month_num', 'params.year_num')}),
-           INTERVAL '1 month'
-         ) AS generated_month
-    LEFT JOIN cosecha cc ON date_trunc('month', cc.fecha_cosecha) = generated_month
-    LEFT JOIN cultivo cu ON cc.idcultivo = cu.idcultivo AND cu.idfinca = $1
-    WHERE COALESCE(UPPER(cc.estado_registro), '') = 'ACTIVO'
-    GROUP BY generated_month
-    ORDER BY generated_month;
-  `;
-
-  const costTrendQuery = `
-    WITH params AS (SELECT $2::int AS month_num, $3::int AS year_num)
-    SELECT TO_CHAR(generated_month, 'Mon YYYY') AS label,
-           COALESCE(SUM(co.valor), 0) AS total_costos
-    FROM params,
-         GENERATE_SERIES(
-           (${dashboardSeriesStart('params.month_num', 'params.year_num')}),
-           (${dashboardSeriesEnd('params.month_num', 'params.year_num')}),
-           INTERVAL '1 month'
-         ) AS generated_month
-    LEFT JOIN costo co ON date_trunc('month', co.fecha) = generated_month
-    LEFT JOIN cultivo cu ON co.idcultivo = cu.idcultivo
-    WHERE co.idfinca = $1
-      AND COALESCE(UPPER(co.estado_registro), '') = 'ACTIVO'
-    GROUP BY generated_month
-    ORDER BY generated_month;
-  `;
+  const productionTrendQuery = buildProductionTrendQuery();
+  const costTrendQuery = buildCostTrendQuery();
 
   const recentActivitiesQuery = `
     WITH finca_cultivos AS (
