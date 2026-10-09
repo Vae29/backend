@@ -111,21 +111,34 @@ export async function fetchCultivosPorUsuario(idUsuario, fincaId = null, estado 
   }
 }
 
+export const FINCAS_POR_USUARIO_QUERY = `SELECT
+  f.idfinca AS id,
+  f.nombre,
+  f.ubicacion,
+  f.estado_registro AS estado_registro
+FROM finca f
+WHERE UPPER(TRIM(f.estado_registro)) = 'ACTIVO'
+  AND (
+    EXISTS (
+      SELECT 1
+      FROM usuario_finca uf
+      WHERE uf.idfinca = f.idfinca
+        AND uf.id_usuario = $1
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM cultivo c
+      INNER JOIN usuario_cultivo uc ON uc.idcultivo = c.idcultivo
+      WHERE c.idfinca = f.idfinca
+        AND uc.id_usuario = $1
+        AND UPPER(TRIM(c.estado_registro)) = 'ACTIVO'
+    )
+  )
+ORDER BY f.nombre`
+
 export async function fetchFincasPorUsuario(idUsuario) {
   try {
-    const result = await pool.query(
-      `SELECT
-         f.idfinca AS id,
-         f.nombre,
-         f.ubicacion,
-         f.estado_registro AS estado_registro
-       FROM finca f
-       INNER JOIN usuario_finca uf ON uf.idfinca = f.idfinca
-       WHERE uf.id_usuario = $1
-         AND UPPER(TRIM(f.estado_registro)) = 'ACTIVO'
-       ORDER BY f.nombre`,
-      [idUsuario]
-    )
+    const result = await pool.query(FINCAS_POR_USUARIO_QUERY, [idUsuario])
     return result.rows
   } catch (error) {
     console.error('Error fetching fincas por usuario:', error)

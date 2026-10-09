@@ -4,6 +4,13 @@ import { verificarAccessToken, verificarWorker } from '../middleware/auth.js'
 
 const router = express.Router();
 
+function preventUserAssignmentCaching(req, res, next) {
+  res.set('Cache-Control', 'no-store')
+  delete req.headers['if-none-match']
+  delete req.headers['if-modified-since']
+  next()
+}
+
 router.get('/fincas', getFincas);
 router.get('/cultivos-en-proceso', getCultivosEnProceso);
 router.get('/cultivos/finca/:fincaId', getCultivosPorFinca);
@@ -25,8 +32,8 @@ router.get('/tipos-precio', getTiposPrecio);
 router.get('/cultivos/:cultivoId/etapas', getEtapasPorCultivo);
 router.get('/tipos-cultivo', getTiposCultivo);
 router.get('/estados', getEstados);
-router.get('/usuario/me/fincas', verificarAccessToken, verificarWorker, getFincasPorUsuario);
-router.get('/usuario/me/cultivos', verificarAccessToken, verificarWorker, getCultivosPorUsuario);
+router.get('/usuario/me/fincas', preventUserAssignmentCaching, verificarAccessToken, verificarWorker, getFincasPorUsuario);
+router.get('/usuario/me/cultivos', preventUserAssignmentCaching, verificarAccessToken, verificarWorker, getCultivosPorUsuario);
 router.get('/costos/finca/:fincaId', verificarAccessToken, getCostosPorFinca);
 router.post('/cultivos', postCultivo);
 router.post('/costos', verificarAccessToken, postCosto);
