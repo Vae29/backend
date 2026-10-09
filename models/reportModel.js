@@ -163,8 +163,7 @@ export function buildReportQuery(reportType, rawFilters = {}) {
           LEFT JOIN subcategoria_costo sc ON sc.idsubcategoria = co.idsubcategoria
           LEFT JOIN categoria_costo cat ON cat.idcategoria = sc.idcategoria
           WHERE ${costConditions}
-          ORDER BY co.fecha DESC
-          LIMIT 1000`,
+          ORDER BY co.fecha DESC`,
         params,
       };
     }
@@ -193,8 +192,7 @@ export function buildReportQuery(reportType, rawFilters = {}) {
           JOIN filtered_crops fc ON fc.idcultivo = cc.idcultivo
           LEFT JOIN unidades_medidas um ON um.idunidadmedida = cc.idunidadmedida
           WHERE ${harvestConditions}
-          ORDER BY cc.fecha_cosecha DESC
-          LIMIT 1000`,
+          ORDER BY cc.fecha_cosecha DESC`,
         params,
       };
     }
@@ -224,8 +222,7 @@ export function buildReportQuery(reportType, rawFilters = {}) {
         FROM filtered_crops fc
         LEFT JOIN costs_by_crop costs ON costs.idcultivo = fc.idcultivo
         LEFT JOIN harvests_by_crop harvests ON harvests.idcultivo = fc.idcultivo
-        ORDER BY ${orderBy}
-        LIMIT 1000`,
+        ORDER BY ${orderBy}`,
       params,
     };
   }
@@ -251,8 +248,7 @@ export function buildReportQuery(reportType, rawFilters = {}) {
         JOIN usuario u ON u.id_usuario = uc.id_usuario
         LEFT JOIN costs_by_crop costs ON costs.idcultivo = uc.idcultivo
         GROUP BY u.id_usuario, u.primer_nombre, u.primer_apellido
-        ORDER BY total_costos DESC
-        LIMIT 1000`,
+        ORDER BY total_costos DESC`,
       params,
     };
   }

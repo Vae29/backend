@@ -75,3 +75,10 @@ test('summary reports aggregate costs and harvests before joining them', () => {
   assert.match(query, /LEFT JOIN harvests_by_crop/);
   assert.doesNotMatch(query, /JOIN cosecha cc ON cc\.idcultivo = cu\.idcultivo[\s\S]*JOIN costo co/);
 });
+
+test('report queries return every matching detail and summary row without an arbitrary row cap', () => {
+  for (const reportType of ['por-cultivo', 'costos', 'produccion', 'rentabilidad', 'trabajador']) {
+    const { query } = buildReportQuery(reportType);
+    assert.doesNotMatch(query, /LIMIT\s+1000/i, `${reportType} should not truncate report rows`);
+  }
+});
