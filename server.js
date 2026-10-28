@@ -19,6 +19,7 @@ const allowedOrigins = [
   process.env.FRONTEND_URL,
   process.env.frontend_url,
   process.env.CLIENT_ORIGIN,
+  'https://agrogestioncostos.netlify.app',
   'https://agrogestion-modulo-costos.netlify.app',
 ].filter(Boolean);
 
