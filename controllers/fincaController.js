@@ -69,7 +69,7 @@ export async function changeFincaState(req, res) {
       return res.status(401).json({ error: 'Usuario no autenticado' });
     }
 
-    const updatedFinca = await fincaModel.changeFincaState(fincaId, nuevoEstado, motivo.trim(), usuarioId);
+    const updatedFinca = await fincaModel.changeFincaState(fincaId, nuevoEstado);
     if (!updatedFinca) {
       return res.status(404).json({ error: 'Finca no encontrada' });
     }

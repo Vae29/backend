@@ -10,7 +10,7 @@ export async function getFilters(fincaId) {
     const cultivosQuery = `
       SELECT idcultivo AS id, nombre, idfinca
       FROM cultivo
-      WHERE (COALESCE(UPPER(estado_registro), '') = 'ACTIVO')
+      WHERE estado_registro = 1
         AND ($1::int IS NULL OR idfinca = $1)
       ORDER BY nombre
     `;
@@ -20,8 +20,8 @@ export async function getFilters(fincaId) {
       ORDER BY primer_nombre
     `;
     const estadosQuery = `
-      SELECT idestado AS id, nombre
-      FROM estado
+      SELECT idestadocultivo AS id, idestadocultivo AS "idestado", nombre
+      FROM estado_cultivo
       ORDER BY nombre
     `;
     const categoriasQuery = `
@@ -87,7 +87,7 @@ function addDateConditions(where, params, alias, column, filters) {
 }
 
 function buildFilteredCrops(filters, params) {
-  const where = [`COALESCE(UPPER(cu.estado_registro), '') = 'ACTIVO'`];
+  const where = [`cu.estado_registro = 1`];
 
   if (filters.fincaId) {
     params.push(filters.fincaId);
@@ -106,22 +106,22 @@ function buildFilteredCrops(filters, params) {
   }
   if (filters.estadoId) {
     params.push(filters.estadoId);
-    where.push(`cu.idestado = $${params.length}`);
+    where.push(`cu.idestadocultivo = $${params.length}`);
   } else if (filters.estado) {
     params.push(String(filters.estado));
     where.push(`LOWER(e.nombre) = LOWER($${params.length})`);
   }
 
   return `filtered_crops AS (
-    SELECT cu.idcultivo, cu.nombre, cu.idestado, e.nombre AS estado
+    SELECT cu.idcultivo, cu.nombre, cu.idestadocultivo AS idestado, e.nombre AS estado
     FROM cultivo cu
-    LEFT JOIN estado e ON e.idestado = cu.idestado
+    LEFT JOIN estado_cultivo e ON e.idestadocultivo = cu.idestadocultivo
     WHERE ${where.join(' AND ')}
   )`;
 }
 
 function buildCostConditions(filters, params) {
-  const where = [`COALESCE(UPPER(co.estado_registro), '') = 'ACTIVO'`];
+  const where = [`co.estado_registro = 1`];
 
   if (filters.categoriaId) {
     params.push(filters.categoriaId);
@@ -136,7 +136,7 @@ function buildCostConditions(filters, params) {
 }
 
 function buildHarvestConditions(filters, params) {
-  const where = [`COALESCE(UPPER(cc.estado_registro), '') = 'ACTIVO'`];
+  const where = [`cc.estado_registro = 1`];
   addDateConditions(where, params, 'cc', 'fecha_cosecha', filters);
   return where.join(' AND ');
 }

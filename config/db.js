@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import pkg from 'pg';
+import { AsyncLocalStorage } from 'async_hooks';
 import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -8,6 +9,7 @@ const envPath = resolve(__dirname, '../.env');
 dotenv.config({ path: envPath });
 
 const { Pool } = pkg;
+const requestDatabaseContext = new AsyncLocalStorage();
 
 const ssl = process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false;
 
@@ -40,6 +42,12 @@ const poolConfig = usingDatabaseUrl
     };
 
 const pool = new Pool(poolConfig);
+const queryPool = pool.query.bind(pool);
+
+pool.query = (...args) => {
+  const context = requestDatabaseContext.getStore();
+  return context ? context.client.query(...args) : queryPool(...args);
+};
 
 console.log(
   `PostgreSQL connection mode: ${usingDatabaseUrl ? 'DATABASE_URL' : usingPgVars ? 'PG_* variables' : 'NONE'}`
@@ -66,3 +74,11 @@ const testConnection = async () => {
 
 export default pool;
 export { testConnection };
+
+export function getRequestDatabaseClient() {
+  return requestDatabaseContext.getStore()?.client || null;
+}
+
+export function runWithRequestDatabaseClient(client, callback) {
+  return requestDatabaseContext.run({ client }, callback);
+}

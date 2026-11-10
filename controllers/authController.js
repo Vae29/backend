@@ -406,7 +406,7 @@ export async function changeUserStateController(req, res) {
       });
     }
 
-    const updatedUser = await changeUserState(id, nuevoEstado, motivo.trim(), usuarioId);
+    const updatedUser = await changeUserState(id, nuevoEstado);
     if (!updatedUser) {
       return res.status(404).json({
         success: false,
@@ -421,8 +421,6 @@ export async function changeUserStateController(req, res) {
         id: updatedUser.id,
         email: updatedUser.email,
         estado_registro: updatedUser.estado_registro,
-        motivo_estado: updatedUser.motivo_estado,
-        fecha_cambio_estado: updatedUser.fecha_cambio_estado,
       },
     });
   } catch (error) {
@@ -446,8 +444,6 @@ export async function getAllUsers(req, res) {
       password: usuario.password,
       rol: Number(usuario.rol) === 1 ? 'Administrador' : 'Trabajador',
       estado_registro: usuario.estado_registro,
-      motivo_estado: usuario.motivo_estado,
-      fecha_cambio_estado: usuario.fecha_cambio_estado,
       fincas: usuario.fincas || [],
       cultivos: usuario.cultivos || [],
     }));

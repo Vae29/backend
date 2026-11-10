@@ -59,7 +59,7 @@ test('combined crop, user, status, cost, subcategory, and date filters are param
   assert.match(query, /cu\.idfinca = \$1/);
   assert.match(query, /cu\.idcultivo = \$2/);
   assert.match(query, /uc\.id_usuario = \$3/);
-  assert.match(query, /cu\.idestado = \$4/);
+  assert.match(query, /cu\.idestadocultivo = \$4/);
   assert.match(query, /sc\.idcategoria = \$5/);
   assert.match(query, /co\.idsubcategoria = \$6/);
   assert.match(query, /co\.fecha >= \$7::date/);

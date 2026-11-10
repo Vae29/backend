@@ -1,11 +1,12 @@
 import pool from '../config/db.js';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
+import { toDatabaseRegistroState } from '../utils/registroEstado.js';
 
 export async function findUserByCredentials(email, password) {
   const result = await pool.query(
-    'SELECT id_usuario AS id, correo AS email, primer_nombre AS nombre, primer_apellido AS apellidos, id_roles AS rol, "contraseña" AS password FROM usuario WHERE correo = $1 AND estado_registro = $2',
-    [email.toLowerCase().trim(), 'ACTIVO']
+    'SELECT id_usuario AS id, correo AS email, primer_nombre AS nombre, primer_apellido AS apellidos, id_roles AS rol, "contraseña" AS password FROM usuario WHERE correo = $1 AND estado_registro = 1',
+    [email.toLowerCase().trim()]
   );
   const user = result.rows[0];
   if (!user) return null;
@@ -22,8 +23,8 @@ export async function findUserByCredentials(email, password) {
 
 export async function findUserByEmail(email) {
   const result = await pool.query(
-    'SELECT id_usuario AS id, correo AS email, primer_nombre AS nombre, primer_apellido AS apellidos, id_roles AS rol FROM usuario WHERE correo = $1 AND estado_registro = $2',
-    [email.toLowerCase().trim(), 'ACTIVO']
+    'SELECT id_usuario AS id, correo AS email, primer_nombre AS nombre, primer_apellido AS apellidos, id_roles AS rol FROM usuario WHERE correo = $1 AND estado_registro = 1',
+    [email.toLowerCase().trim()]
   );
   return result.rows[0] || null;
 }
@@ -37,15 +38,13 @@ export async function fetchAllUsers(estado = 'ACTIVO') {
       u.primer_apellido,
       u.id_roles AS rol,
       u."contraseña" AS password,
-      u.estado_registro,
-      u.motivo_estado,
-      u.fecha_cambio_estado,
+      CASE WHEN u.estado_registro = 1 THEN 'ACTIVO' ELSE 'DESACTIVADO' END AS estado_registro,
       COALESCE((SELECT array_agg(idfinca) FROM usuario_finca uf WHERE uf.id_usuario = u.id_usuario), ARRAY[]::integer[]) AS fincas,
       COALESCE((SELECT array_agg(idcultivo) FROM usuario_cultivo uc WHERE uc.id_usuario = u.id_usuario), ARRAY[]::integer[]) AS cultivos
     FROM usuario u
     WHERE u.estado_registro = $1
     ORDER BY u.id_usuario`,
-    [estado]
+    [toDatabaseRegistroState(estado)]
   );
   return result.rows;
 }
@@ -53,8 +52,11 @@ export async function fetchAllUsers(estado = 'ACTIVO') {
 export async function createUser({ nombre, apellidos, correo, contraseña, rol, fincas = [], cultivos = [] }) {
   const roleId = rol === 'administrador' ? 1 : 2
   const result = await pool.query(
-    'INSERT INTO usuario (primer_nombre, primer_apellido, correo, "contraseña", id_roles, estado_registro) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id_usuario AS id, correo AS email, primer_nombre, primer_apellido, id_roles AS rol, "contraseña" AS password, estado_registro',
-    [nombre, apellidos, correo, contraseña, roleId, 'ACTIVO']
+    `INSERT INTO usuario (primer_nombre, primer_apellido, correo, "contraseña", id_roles, estado_registro)
+     VALUES ($1, $2, $3, $4, $5, 1)
+     RETURNING id_usuario AS id, correo AS email, primer_nombre, primer_apellido,
+               id_roles AS rol, "contraseña" AS password, 'ACTIVO'::text AS estado_registro`,
+    [nombre, apellidos, correo, contraseña, roleId]
   )
   
   const userId = result.rows[0].id;
@@ -81,7 +83,12 @@ export async function createUser({ nombre, apellidos, correo, contraseña, rol, 
 export async function updateUser(id, { nombre, apellidos, correo, contraseña, rol, fincas = [], cultivos = [] }) {
   const roleId = rol === 'administrador' ? 1 : 2
   const result = await pool.query(
-    'UPDATE usuario SET primer_nombre = $1, primer_apellido = $2, correo = $3, "contraseña" = $4, id_roles = $5 WHERE id_usuario = $6 RETURNING id_usuario AS id, correo AS email, primer_nombre, primer_apellido, id_roles AS rol, "contraseña" AS password, estado_registro',
+    `UPDATE usuario
+     SET primer_nombre = $1, primer_apellido = $2, correo = $3, "contraseña" = $4, id_roles = $5
+     WHERE id_usuario = $6
+     RETURNING id_usuario AS id, correo AS email, primer_nombre, primer_apellido,
+               id_roles AS rol, "contraseña" AS password,
+               CASE WHEN estado_registro = 1 THEN 'ACTIVO' ELSE 'DESACTIVADO' END AS estado_registro`,
     [nombre, apellidos, correo, contraseña, roleId, id]
   )
   
@@ -118,16 +125,15 @@ export async function updateUser(id, { nombre, apellidos, correo, contraseña, r
   return result.rows[0]
 }
 
-export async function changeUserState(id, nuevoEstado, motivo, usuarioId) {
+export async function changeUserState(id, nuevoEstado) {
   const result = await pool.query(
     `UPDATE usuario
-     SET estado_registro = $1,
-         motivo_estado = $2,
-         fecha_cambio_estado = NOW(),
-         usuario_cambio_estado = $3
-     WHERE id_usuario = $4
-     RETURNING id_usuario AS id, correo AS email, primer_nombre, primer_apellido, id_roles AS rol, estado_registro, motivo_estado, fecha_cambio_estado`,
-    [nuevoEstado, motivo, usuarioId, id]
+     SET estado_registro = $1
+     WHERE id_usuario = $2
+     RETURNING id_usuario AS id, correo AS email, primer_nombre, primer_apellido,
+               id_roles AS rol,
+               CASE WHEN estado_registro = 1 THEN 'ACTIVO' ELSE 'DESACTIVADO' END AS estado_registro`,
+    [toDatabaseRegistroState(nuevoEstado), id]
   );
   return result.rows[0];
 }
@@ -136,7 +142,7 @@ export async function changeUserState(id, nuevoEstado, motivo, usuarioId) {
 export async function deleteUser(id) {
   const result = await pool.query(
     'UPDATE usuario SET estado_registro = $1 WHERE id_usuario = $2 RETURNING id_usuario AS id',
-    ['DESACTIVADO', id]
+    [0, id]
   )
   return result.rows[0]
 }
@@ -179,7 +185,7 @@ async function findCurrentResetToken(client, email) {
      FROM password_reset_tokens t
      JOIN usuario u ON u.id_usuario = t.id_usuario
      WHERE LOWER(u.correo) = $1
-       AND u.estado_registro = 'ACTIVO'
+       AND u.estado_registro = 1
        AND t.used = false
        AND t.expires_at > NOW()
        AND t.failed_attempts < 5
@@ -242,10 +248,17 @@ export async function completePasswordReset(email, code, passwordHash) {
       return false;
     }
 
+    await client.query(
+      `SELECT public.fn_auditoria_contexto(
+        $1::integer, NULL, NULL, NULL, 'USUARIOS', 'Recuperación de contraseña'
+      )`,
+      [token.id_usuario]
+    );
+
     const userResult = await client.query(
       `UPDATE usuario
        SET "contraseña" = $1
-       WHERE id_usuario = $2 AND estado_registro = 'ACTIVO'
+       WHERE id_usuario = $2 AND estado_registro = 1
        RETURNING id_usuario`,
       [passwordHash, token.id_usuario]
     );

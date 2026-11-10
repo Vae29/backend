@@ -795,7 +795,7 @@ export async function changeCultivoStateController(req, res) {
       return res.status(401).json({ success: false, message: 'Usuario no autenticado' });
     }
 
-    const updated = await changeCultivoState(cultivoId, nuevoEstado, motivo.trim(), usuarioId);
+    const updated = await changeCultivoState(cultivoId, nuevoEstado);
     if (!updated) {
       return res.status(404).json({ success: false, message: 'Cultivo no encontrado' });
     }
@@ -832,7 +832,7 @@ export async function changeCostoStateController(req, res) {
       return res.status(401).json({ success: false, message: 'Usuario no autenticado' });
     }
 
-    const updated = await changeCostoState(costoId, nuevoEstado, motivo.trim(), usuarioId);
+    const updated = await changeCostoState(costoId, nuevoEstado);
     if (!updated) {
       return res.status(404).json({ success: false, message: 'Costo no encontrado' });
     }
@@ -865,7 +865,7 @@ export async function changeEtapaStateController(req, res) {
       return res.status(401).json({ success: false, message: 'Usuario no autenticado' });
     }
 
-    const updated = await changeEtapaState(etapaId, nuevoEstado, motivo.trim(), usuarioId);
+    const updated = await changeEtapaState(etapaId, nuevoEstado);
     if (!updated) {
       return res.status(404).json({ success: false, message: 'Etapa no encontrada' });
     }
@@ -898,7 +898,7 @@ export async function changeCosechaStateController(req, res) {
       return res.status(401).json({ success: false, message: 'Usuario no autenticado' });
     }
 
-    const updated = await changeCosechaState(cosechaId, nuevoEstado, motivo.trim(), usuarioId);
+    const updated = await changeCosechaState(cosechaId, nuevoEstado);
     if (!updated) {
       return res.status(404).json({ success: false, message: 'Cosecha no encontrada' });
     }
@@ -909,4 +909,3 @@ export async function changeCosechaStateController(req, res) {
     res.status(500).json({ success: false, message: 'Error al cambiar el estado de la cosecha' });
   }
 }
-
