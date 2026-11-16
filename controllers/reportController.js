@@ -1,4 +1,5 @@
 import * as reportModel from '../models/reportModel.js';
+import { getReportModelContext } from '../models/reportExportModel.js';
 
 // Controlador para devolver opciones de filtros dinámicos
 export async function getReportFilters(req, res) {
@@ -24,6 +25,20 @@ export async function postReportQuery(req, res) {
     const { reportType, filters } = req.body || {};
     if (!reportType) {
       return res.status(400).json({ success: false, message: 'reportType es requerido' });
+    }
+
+    if (reportType === 'costos') {
+      const reportFilters = filters || {};
+      const context = reportFilters.fincaId
+        ? await getReportModelContext(reportFilters.fincaId, req.user?.id || null)
+        : {};
+      const model = await reportModel.buildReportModel('costos', reportFilters, context);
+      return res.json({
+        success: true,
+        data: model.rows,
+        model,
+        ...(model.rows.length ? {} : { message: 'Sin resultados para los filtros seleccionados' }),
+      });
     }
 
     let data = [];
@@ -68,8 +83,16 @@ export async function postReportPorCultivo(req, res) {
 export async function postReportCostos(req, res) {
   try {
     const filters = req.body || {};
-    const data = await reportModel.reportCostos(filters);
-    return sendReportResponse(res, data);
+    const context = filters.fincaId
+      ? await getReportModelContext(filters.fincaId, req.user?.id || null)
+      : {};
+    const model = await reportModel.buildReportModel('costos', filters, context);
+    return res.json({
+      success: true,
+      data: model.rows,
+      model,
+      ...(model.rows.length ? {} : { message: 'Sin resultados para los filtros seleccionados' }),
+    });
   } catch (error) {
     console.error('Error en postReportCostos:', { body: req.body, error: error.stack || error });
     return res.status(500).json({ success: false, message: 'Error ejecutando reporte de costos' });

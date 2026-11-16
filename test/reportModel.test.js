@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildReportQuery } from '../models/reportModel.js';
+import { assembleCostsReportModel, buildReportQuery } from '../models/reportModel.js';
 
 test('cost reports filter category through the cost subcategory relation', () => {
   const { query, params } = buildReportQuery('costos', { categoriaId: '4' });
@@ -100,10 +100,21 @@ test('cost reports include allocated and unallocated general costs', () => {
   const { query, params } = buildReportQuery('costos', { fincaId: 7 });
 
   assert.deepEqual(params, [7]);
+  assert.match(query, /co\.idcosto AS id_costo/);
+  assert.match(query, /fc\.idcultivo AS id_cultivo/);
   assert.match(query, /general_costs AS \(/);
   assert.match(query, /allocated_general AS \(/);
   assert.match(query, /unallocated_general AS \(/);
   assert.match(query, /round\(gc\.valor \* p\.porcentaje \/ 100, 2\)/);
+  assert.match(query, /unidad_base/);
+});
+
+test('costs model can join harvest income rows by crop and stage', () => {
+  const { query } = buildReportQuery('produccion');
+
+  assert.match(query, /fc\.idcultivo AS id_cultivo/);
+  assert.match(query, /cc\.cantidad_cosechada \* cc\.precio_unitario AS ingreso/);
+  assert.match(query, /cc\.idetapa_cultivo AS id_etapa_cultivo/);
 });
 
 test('crop cost unit uses all crop costs and only comparable base-unit production', () => {
@@ -114,4 +125,77 @@ test('crop cost unit uses all crop costs and only comparable base-unit productio
   assert.match(query, /bool_and\(total_produccion IS NOT NULL\)/);
   assert.match(query, /COALESCE\(cost_totals\.costo_produccion, 0\) \/ production_totals\.total_produccion/);
   assert.match(query, /sc\.incluir_costo_unitario/);
+});
+
+test('costs report model totals use exact cents and keep unallocated costs separate', () => {
+  const model = assembleCostsReportModel({
+    filters: { fechaInicio: '2026-10-01', fechaFin: '2026-10-31' },
+    context: { finca: 'Finca Norte', usuario: 'Ana' },
+    generatedAt: new Date('2026-11-01T04:00:00.000Z'),
+    costRows: [
+      {
+        id_cultivo: 7,
+        id_etapa_cultivo: 3,
+        cultivo: 'Café',
+        etapa: 'Cosecha',
+        categoria: 'Insumos',
+        descripcion: 'Fertilizante',
+        valor: '100.25',
+        fecha: '2026-10-31',
+        origen: 'CULTIVO',
+      },
+      {
+        id_cultivo: null,
+        id_etapa_cultivo: null,
+        cultivo: null,
+        etapa: null,
+        categoria: 'Generales',
+        descripcion: 'Costo no asignado',
+        valor: '-5.00',
+        fecha: '2026-10-31',
+        origen: 'GENERAL_SIN_PRORRATEAR',
+      },
+    ],
+    harvestRows: [{
+      id_cultivo: 7,
+      id_etapa_cultivo: 3,
+      cultivo: 'Café',
+      etapa: 'Cosecha',
+      ingreso: '250.50',
+      cantidad: '10',
+      precio_unitario: '25.05',
+      fecha: '2026-10-31',
+      unidad: 'kg',
+    }],
+  });
+
+  assert.equal(model.totals.ingresos, '250.50');
+  assert.equal(model.totals.costos, '95.25');
+  assert.equal(model.totals.ganancia, '155.25');
+  assert.equal(model.groups.byCropStage[0].costos, '100.25');
+  assert.equal(model.groups.byCropStage[0].ganancia, '150.25');
+  assert.equal(model.groups.unallocatedCosts, '-5.00');
+  assert.equal(model.rows.find((row) => row.kind === 'income').fecha, '2026-10-31');
+  assert.equal(model.rows.length, 3);
+});
+
+test('empty costs report model has exact zero totals and no groups', () => {
+  const model = assembleCostsReportModel({
+    costRows: [],
+    harvestRows: [],
+    generatedAt: new Date('2026-11-01T04:00:00.000Z'),
+  });
+
+  assert.deepEqual(model.totals, {
+    ingresosCentavos: '0',
+    costosCentavos: '0',
+    gananciaCentavos: '0',
+    ingresos: '0.00',
+    costos: '0.00',
+    ganancia: '0.00',
+    margen: 0,
+    registroCount: 0,
+  });
+  assert.deepEqual(model.groups.byCategory, []);
+  assert.deepEqual(model.groups.byCropStage, []);
 });

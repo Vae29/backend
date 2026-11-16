@@ -118,7 +118,7 @@ function addDateConditions(where, params, alias, column, filters) {
   }
 }
 
-function buildFilteredCrops(filters, params) {
+function buildFilteredCrops(filters, params, includeBaseUnit = false) {
   const where = [`cu.estado_registro = 1`];
 
   if (filters.fincaId) {
@@ -148,9 +148,18 @@ function buildFilteredCrops(filters, params) {
     where.push(`LOWER(e.nombre) = LOWER($${params.length})`);
   }
 
+  const baseUnitSelection = includeBaseUnit
+    ? `, (SELECT um.nombre
+         FROM conversion_unidades_cultivo base_conv
+         JOIN unidades_medidas um ON um.idunidadmedida = base_conv.idunidadmedida
+         WHERE base_conv.idtipocultivo = cu.idtipocultivo
+           AND base_conv.es_unidad_base = TRUE
+         LIMIT 1) AS unidad_base`
+    : '';
+
   return `filtered_crops AS (
     SELECT cu.idcultivo, cu.nombre, cu.idestadocultivo AS idestado, e.nombre AS estado,
-           cu.idtipocultivo, tc.nombre AS tipo_cultivo
+           cu.idtipocultivo, tc.nombre AS tipo_cultivo${baseUnitSelection}
     FROM cultivo cu
     LEFT JOIN estado_cultivo e ON e.idestadocultivo = cu.idestadocultivo
     LEFT JOIN tipos_cultivo tc ON tc.idtipocultivo = cu.idtipocultivo
@@ -198,7 +207,7 @@ function buildHarvestConditions(filters, params) {
 export function buildReportQuery(reportType, rawFilters = {}) {
   const filters = normalizeFilters(rawFilters);
   const params = [];
-  const filteredCrops = buildFilteredCrops(filters, params);
+  const filteredCrops = buildFilteredCrops(filters, params, reportType === 'costos');
   const ctes = [filteredCrops];
   let costConditions;
 
@@ -225,9 +234,11 @@ export function buildReportQuery(reportType, rawFilters = {}) {
               AND ${fincaCondition}
           ),
           direct_costs AS (
-            SELECT COALESCE(sc.codigo_contable, cat.codigo_contable) AS codigo_contable,
+            SELECT co.idcosto AS id_costo, fc.idcultivo AS id_cultivo,
+                   co.idetapa_cultivo AS id_etapa_cultivo,
+                   COALESCE(sc.codigo_contable, cat.codigo_contable) AS codigo_contable,
                    cat.nombre AS categoria, sc.nombre AS subcategoria,
-                   fc.nombre AS cultivo, fc.tipo_cultivo,
+                   fc.nombre AS cultivo, fc.tipo_cultivo, fc.unidad_base,
                    et.nombre_etapa AS etapa, co.idetapa_cultivo AS "etapaId",
                    co.descripcion, co.valor, co.fecha, 'CULTIVO'::text AS origen,
                    NULL::numeric AS porcentaje_prorrateo
@@ -240,9 +251,11 @@ export function buildReportQuery(reportType, rawFilters = {}) {
             WHERE ${costConditions}
           ),
           allocated_general AS (
-            SELECT COALESCE(gc.codigo_subcategoria, gc.codigo_categoria) AS codigo_contable,
+            SELECT gc.idcosto AS id_costo, fc.idcultivo AS id_cultivo,
+                   NULL::integer AS id_etapa_cultivo,
+                   COALESCE(gc.codigo_subcategoria, gc.codigo_categoria) AS codigo_contable,
                    gc.categoria, gc.subcategoria, fc.nombre AS cultivo,
-                   fc.tipo_cultivo, NULL::text AS etapa, NULL::integer AS "etapaId",
+                   fc.tipo_cultivo, fc.unidad_base, NULL::text AS etapa, NULL::integer AS "etapaId",
                    gc.descripcion,
                    round(gc.valor * p.porcentaje / 100, 2) AS valor,
                    gc.fecha, 'PRORRATEADO'::text AS origen,
@@ -253,9 +266,11 @@ export function buildReportQuery(reportType, rawFilters = {}) {
             WHERE ${stageUnfiltered}
           ),
           unallocated_general AS (
-            SELECT COALESCE(gc.codigo_subcategoria, gc.codigo_categoria) AS codigo_contable,
+            SELECT gc.idcosto AS id_costo, NULL::integer AS id_cultivo,
+                   NULL::integer AS id_etapa_cultivo,
+                   COALESCE(gc.codigo_subcategoria, gc.codigo_categoria) AS codigo_contable,
                    gc.categoria, gc.subcategoria, NULL::text AS cultivo,
-                   NULL::text AS tipo_cultivo, NULL::text AS etapa,
+                   NULL::text AS tipo_cultivo, NULL::text AS unidad_base, NULL::text AS etapa,
                    NULL::integer AS "etapaId", gc.descripcion, gc.valor, gc.fecha,
                    'GENERAL_SIN_PRORRATEAR'::text AS origen,
                    NULL::numeric AS porcentaje_prorrateo
@@ -316,6 +331,7 @@ export function buildReportQuery(reportType, rawFilters = {}) {
         query: `WITH ${filteredCrops}
           SELECT fc.nombre AS cultivo,
                  fc.tipo_cultivo,
+                 fc.idcultivo AS id_cultivo,
                  cc.cantidad_cosechada AS cantidad,
                  CASE
                    WHEN conv.factor_a_unidad_base IS NOT NULL
@@ -325,9 +341,11 @@ export function buildReportQuery(reportType, rawFilters = {}) {
                  base_unit.nombre AS unidad_base,
                  cc.fecha_cosecha AS fecha,
                  cc.precio_unitario AS precio_unitario,
+                 cc.cantidad_cosechada * cc.precio_unitario AS ingreso,
                  um.nombre AS unidad,
                  et.nombre_etapa AS etapa,
-                 cc.idetapa_cultivo AS "etapaId"
+                 cc.idetapa_cultivo AS "etapaId",
+                 cc.idetapa_cultivo AS id_etapa_cultivo
           FROM cosecha cc
           JOIN filtered_crops fc ON fc.idcultivo = cc.idcultivo
           LEFT JOIN unidades_medidas um ON um.idunidadmedida = cc.idunidadmedida
@@ -534,4 +552,272 @@ export async function fetchReportData(reportType, filters = {}) {
     throw Object.assign(new Error('Tipo de reporte desconocido.'), { statusCode: 400 });
   }
   return run(filters);
+}
+
+const costsReportColumns = [
+  { key: 'fecha', header: 'Fecha', type: 'date', width: 14, total: 'none' },
+  { key: 'cultivo', header: 'Cultivo', type: 'text', width: 24, total: 'none' },
+  { key: 'categoria', header: 'Categoría', type: 'text', width: 22, total: 'none' },
+  { key: 'concepto', header: 'Concepto', type: 'text', width: 36, total: 'none' },
+  { key: 'cantidad', header: 'Cantidad', type: 'number', width: 14, total: 'none' },
+  { key: 'unidad', header: 'Unidad', type: 'text', width: 14, total: 'none' },
+  { key: 'valor_unitario', header: 'Valor unitario', type: 'money', width: 18, total: 'none' },
+  { key: 'costo', header: 'Costo', type: 'money', width: 18, total: 'sum' },
+  { key: 'ingreso', header: 'Ingreso', type: 'money', width: 18, total: 'sum' },
+  { key: 'ganancia', header: 'Ganancia', type: 'money', width: 18, total: 'sum' },
+  { key: 'margen', header: 'Margen %', type: 'percent', width: 14, total: 'none' },
+  { key: 'rowId', header: 'ID fila', type: 'text', width: 16, total: 'none' },
+];
+
+const costsTechnicalColumns = [
+  { key: 'rowId', header: 'ID fila', type: 'text', width: 16, total: 'none' },
+  { key: 'codigo_contable', header: 'Código contable', type: 'text', width: 18, total: 'none' },
+  { key: 'origen', header: 'Origen', type: 'text', width: 24, total: 'none' },
+  { key: 'porcentaje_prorrateo', header: 'Prorrateo %', type: 'percent', width: 16, total: 'none' },
+  { key: 'unidad_base', header: 'Unidad base', type: 'text', width: 18, total: 'none' },
+  { key: 'etapa', header: 'Etapa', type: 'text', width: 22, total: 'none' },
+  { key: 'subcategoria', header: 'Subcategoría', type: 'text', width: 26, total: 'none' },
+];
+
+function decimalToCents(value) {
+  const text = String(value ?? '0').trim();
+  const match = /^([+-]?)(\d+)(?:\.(\d+))?$/.exec(text);
+  if (!match) throw new TypeError(`Invalid monetary value returned by PostgreSQL: ${text}`);
+  const [, sign, whole, fraction = ''] = match;
+  const firstTwoDecimals = (fraction + '00').slice(0, 2);
+  const shouldRound = Number(fraction[2] || 0) >= 5;
+  const cents = BigInt(whole) * 100n + BigInt(firstTwoDecimals) + (shouldRound ? 1n : 0n);
+  return sign === '-' ? -cents : cents;
+}
+
+function centsToDecimal(cents) {
+  const negative = cents < 0n;
+  const absolute = negative ? -cents : cents;
+  const value = `${absolute / 100n}.${String(absolute % 100n).padStart(2, '0')}`;
+  return negative ? `-${value}` : value;
+}
+
+function reportDateValue(value) {
+  if (!value) return null;
+  if (!(value instanceof Date)) return String(value).slice(0, 10);
+  return `${value.getUTCFullYear()}-${String(value.getUTCMonth() + 1).padStart(2, '0')}-${String(value.getUTCDate()).padStart(2, '0')}`;
+}
+
+function groupLabel(row) {
+  return row.cultivo || 'Sin cultivo asignado';
+}
+
+function groupKey(row) {
+  if (!row.id_cultivo) return 'unallocated';
+  return `${row.id_cultivo}:${row.id_etapa_cultivo ?? 'none'}`;
+}
+
+function appliedFilterLabels(filters) {
+  const labels = {
+    fincaId: 'Finca (ID)',
+    cultivoId: 'Cultivo (ID)',
+    categoriaId: 'Categoría (ID)',
+    subcategoriaId: 'Subcategoría (ID)',
+    usuarioId: 'Usuario (ID)',
+    estadoId: 'Estado (ID)',
+    tipoCultivoId: 'Tipo de cultivo (ID)',
+    etapaId: 'Etapa (ID)',
+    fechaInicio: 'Desde',
+    fechaFin: 'Hasta',
+  };
+  return Object.entries(filters)
+    .filter(([, value]) => value != null && value !== '')
+    .map(([key, value]) => `${labels[key] || key}: ${value}`);
+}
+
+export function assembleCostsReportModel({
+  costRows,
+  harvestRows,
+  filters = {},
+  context = {},
+  generatedAt = new Date(),
+}) {
+  const rows = [];
+  const groupMap = new Map();
+  const categoryMap = new Map();
+  let totalCostsCents = 0n;
+  let totalIncomeCents = 0n;
+  let costIndex = 0;
+  let incomeIndex = 0;
+
+  const ensureGroup = (key, row) => {
+    if (!groupMap.has(key)) {
+      groupMap.set(key, {
+        key,
+        groupId: key,
+        cultivo: groupLabel(row),
+        etapa: row.etapa || 'Sin etapa',
+        ingresosCents: 0n,
+        costosCents: 0n,
+      });
+    }
+    return groupMap.get(key);
+  };
+
+  for (const row of costRows) {
+    const cents = decimalToCents(row.valor);
+    const key = groupKey(row);
+    const group = ensureGroup(key, row);
+    group.costosCents += cents;
+    totalCostsCents += cents;
+    const category = row.categoria || 'Sin categoría';
+    categoryMap.set(category, (categoryMap.get(category) || 0n) + cents);
+    costIndex += 1;
+    rows.push({
+      rowId: `C${String(costIndex).padStart(6, '0')}`,
+      kind: 'cost',
+      fecha: reportDateValue(row.fecha),
+      cultivo: groupLabel(row),
+      etapa: row.etapa || 'Sin etapa',
+      categoria: category,
+      concepto: row.descripcion || '',
+      cantidad: null,
+      unidad: null,
+      valor_unitario: null,
+      costo: centsToDecimal(cents),
+      ingreso: '0.00',
+      ganancia: centsToDecimal(-cents),
+      margen: 0,
+      codigo_contable: row.codigo_contable,
+      origen: row.origen,
+      porcentaje_prorrateo: row.porcentaje_prorrateo,
+      unidad_base: row.unidad_base,
+      subcategoria: row.subcategoria,
+      id_cultivo: row.id_cultivo,
+      id_etapa_cultivo: row.id_etapa_cultivo,
+    });
+  }
+
+  for (const row of harvestRows) {
+    const cents = decimalToCents(row.ingreso);
+    const key = `${row.id_cultivo}:${row.id_etapa_cultivo ?? 'none'}`;
+    const group = ensureGroup(key, row);
+    group.ingresosCents += cents;
+    totalIncomeCents += cents;
+    incomeIndex += 1;
+    rows.push({
+      rowId: `I${String(incomeIndex).padStart(6, '0')}`,
+      kind: 'income',
+      fecha: reportDateValue(row.fecha),
+      cultivo: groupLabel(row),
+      etapa: row.etapa || 'Sin etapa',
+      categoria: 'Ingresos',
+      concepto: 'Ingreso por cosecha',
+      cantidad: row.cantidad == null ? null : String(row.cantidad),
+      unidad: row.unidad,
+      valor_unitario: row.precio_unitario == null ? null : String(row.precio_unitario),
+      costo: '0.00',
+      ingreso: centsToDecimal(cents),
+      ganancia: centsToDecimal(cents),
+      margen: cents > 0n ? 1 : 0,
+      codigo_contable: null,
+      origen: null,
+      porcentaje_prorrateo: null,
+      unidad_base: row.unidad_base,
+      subcategoria: null,
+      id_cultivo: row.id_cultivo,
+      id_etapa_cultivo: row.id_etapa_cultivo,
+    });
+  }
+
+  rows.sort((a, b) => (b.fecha || '').localeCompare(a.fecha || '') || a.rowId.localeCompare(b.rowId));
+  const totalProfitCents = totalIncomeCents - totalCostsCents;
+  const groups = {
+    byCategory: [...categoryMap.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([categoria, cents]) => ({ categoria, costos: centsToDecimal(cents) })),
+    byCropStage: [...groupMap.values()]
+      .map((group) => {
+        const gananciaCents = group.ingresosCents - group.costosCents;
+        return {
+          groupId: group.groupId,
+          cultivo: group.cultivo,
+          etapa: group.etapa,
+          ingresos: centsToDecimal(group.ingresosCents),
+          costos: centsToDecimal(group.costosCents),
+          ganancia: centsToDecimal(gananciaCents),
+          margen: group.ingresosCents === 0n ? 0 : Number(gananciaCents) / Number(group.ingresosCents),
+        };
+      })
+      .sort((a, b) => a.cultivo.localeCompare(b.cultivo) || a.etapa.localeCompare(b.etapa)),
+    byCrop: [...groupMap.values().reduce((byCrop, group) => {
+      const current = byCrop.get(group.cultivo) || {
+        groupId: group.cultivo,
+        cultivo: group.cultivo,
+        ingresosCents: 0n,
+        costosCents: 0n,
+      };
+      current.ingresosCents += group.ingresosCents;
+      current.costosCents += group.costosCents;
+      byCrop.set(group.cultivo, current);
+      return byCrop;
+    }, new Map()).values()]
+      .map((group) => {
+        const gananciaCents = group.ingresosCents - group.costosCents;
+        return {
+          groupId: group.groupId,
+          cultivo: group.cultivo,
+          ingresos: centsToDecimal(group.ingresosCents),
+          costos: centsToDecimal(group.costosCents),
+          ganancia: centsToDecimal(gananciaCents),
+          margen: group.ingresosCents === 0n ? 0 : Number(gananciaCents) / Number(group.ingresosCents),
+        };
+      })
+      .sort((a, b) => a.cultivo.localeCompare(b.cultivo)),
+    unallocatedCosts: centsToDecimal(groupMap.get('unallocated')?.costosCents || 0n),
+  };
+
+  return {
+    meta: {
+      finca: context.finca || null,
+      razonSocial: null,
+      nit: null,
+      reportName: 'Reporte de costos',
+      period: {
+        from: filters.fechaInicio || null,
+        to: filters.fechaFin || null,
+      },
+      filters: appliedFilterLabels(filters),
+      generatedAt: generatedAt.toISOString(),
+      usuario: context.usuario || null,
+      traceId: context.traceId || null,
+    },
+    columns: costsReportColumns,
+    technicalColumns: costsTechnicalColumns,
+    rows,
+    groups,
+    totals: {
+      ingresosCentavos: totalIncomeCents.toString(),
+      costosCentavos: totalCostsCents.toString(),
+      gananciaCentavos: totalProfitCents.toString(),
+      ingresos: centsToDecimal(totalIncomeCents),
+      costos: centsToDecimal(totalCostsCents),
+      ganancia: centsToDecimal(totalProfitCents),
+      margen: totalIncomeCents === 0n ? 0 : Number(totalProfitCents) / Number(totalIncomeCents),
+      registroCount: rows.length,
+    },
+  };
+}
+
+export async function buildReportModel(reportType, filters = {}, context = {}) {
+  if (reportType !== 'costos') {
+    throw Object.assign(new Error('El modelo único solo está implementado para el reporte de costos.'), {
+      statusCode: 400,
+    });
+  }
+  const [costRows, harvestRows] = await Promise.all([
+    reportCostos(filters),
+    reportProduccion(filters),
+  ]);
+  return assembleCostsReportModel({
+    costRows,
+    harvestRows,
+    filters,
+    context,
+  });
 }

@@ -1,5 +1,17 @@
 import pool from '../config/db.js';
 
+export async function getReportModelContext(fincaId, userId = null) {
+  const result = await pool.query(
+    `SELECT f.nombre AS finca,
+            COALESCE(u.primer_nombre || ' ' || u.primer_apellido, '') AS usuario
+     FROM finca f
+     LEFT JOIN usuario u ON u.id_usuario = $2 AND u.estado_registro = 1
+     WHERE f.idfinca = $1 AND f.estado_registro = 1`,
+    [fincaId, userId]
+  );
+  return result.rows[0] || { finca: null, usuario: null };
+}
+
 export async function getReportExportContext(userId, fincaId) {
   const result = await pool.query(
     `SELECT f.nombre AS finca,

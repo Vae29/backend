@@ -415,7 +415,479 @@ function buildPdf(reportType, rows, filters, context, generatedAt) {
   return Buffer.from(doc.output('arraybuffer'));
 }
 
-export async function generateReportExport({ reportType, format, rows, filters, context }) {
+function centsValue(decimalValue) {
+  const match = /^([+-]?)(\d+)(?:\.(\d+))?$/.exec(String(decimalValue || '0'));
+  if (!match) throw new TypeError(`Invalid monetary value in costs report: ${decimalValue}`);
+  const [, sign, whole, fraction = ''] = match;
+  const cents = BigInt(whole) * 100n +
+    BigInt((fraction + '00').slice(0, 2)) +
+    (Number(fraction[2] || 0) >= 5 ? 1n : 0n);
+  return Number(sign === '-' ? -cents : cents) / 100;
+}
+
+function excelDateFromISO(value) {
+  if (!value) return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value));
+  if (!match) return null;
+  return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+}
+
+function dateForPDF(value) {
+  if (!value) return '';
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value));
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : String(value);
+}
+
+function reportNumberFormat(value) {
+  const number = Number(value) || 0;
+  const formatted = new Intl.NumberFormat('es-CO', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Math.abs(number));
+  return number < 0 ? `(${formatted})` : formatted;
+}
+
+function reportFiltersText(meta) {
+  return meta.filters.length ? meta.filters.join(' · ') : 'Sin filtros adicionales';
+}
+
+function modelTotals(model) {
+  return {
+    ingresos: centsValue(model.totals.ingresos),
+    costos: centsValue(model.totals.costos),
+    ganancia: centsValue(model.totals.ganancia),
+    margen: model.totals.margen,
+  };
+}
+
+function addModelSummary(workbook, model, totalRow, detailColumnLetters) {
+  const sheet = workbook.addWorksheet('Resumen');
+  sheet.columns = [
+    { width: 28 }, { width: 44 }, { width: 4 },
+    { width: 26 }, { width: 20 }, { width: 4 },
+    { width: 26 }, { width: 18 }, { width: 18 }, { width: 18 }, { width: 14 },
+  ];
+  const generated = new Intl.DateTimeFormat('es-CO', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+    timeZone: 'America/Bogota',
+  }).format(new Date(model.meta.generatedAt));
+  const metadataRows = [
+    ['Razón social', model.meta.razonSocial || 'Pendiente de configurar'],
+    ['NIT', model.meta.nit || 'Pendiente de configurar'],
+    ['Finca', model.meta.finca || 'No especificada'],
+    ['Reporte', model.meta.reportName],
+    ['Periodo', `${model.meta.period.from || 'Sin inicio'} a ${model.meta.period.to || 'Sin fin'}`],
+    ['Filtros aplicados', reportFiltersText(model.meta)],
+    ['Generado', `${generated} (America/Bogota)`],
+    ['Usuario', model.meta.usuario || 'No especificado'],
+    ['Cantidad de registros', model.totals.registroCount],
+    ['Total ingresos', null],
+    ['Total costos', null],
+    ['Ganancia total', null],
+    ['Margen', null],
+    ['ID de trazabilidad', model.meta.traceId || 'No disponible'],
+  ];
+  metadataRows.forEach(([label, value], index) => {
+    sheet.getCell(index + 1, 1).value = label;
+    sheet.getCell(index + 1, 2).value = value;
+  });
+  const totals = modelTotals(model);
+  const totalRowCells = {
+    ingresos: detailColumnLetters.ingreso,
+    costos: detailColumnLetters.costo,
+    ganancia: detailColumnLetters.ganancia,
+  };
+  for (const [offset, key] of [[10, 'ingresos'], [11, 'costos'], [12, 'ganancia']]) {
+    const column = totalRowCells[key];
+    sheet.getCell(offset, 2).value = {
+      formula: `Detalle!${column}${totalRow}`,
+      result: totals[key],
+    };
+    sheet.getCell(offset, 2).numFmt = '#,##0;(#,##0)';
+  }
+  sheet.getCell(13, 2).value = {
+    formula: 'IF(B10=0,0,B12/B10)',
+    result: totals.margen,
+  };
+  sheet.getCell(13, 2).numFmt = '0.00%;(0.00%)';
+
+  sheet.getCell('D1').value = 'Costos por categoría';
+  sheet.getCell('D2').value = 'Categoría';
+  sheet.getCell('E2').value = 'Costo';
+  model.groups.byCategory.forEach((group, index) => {
+    const row = index + 3;
+    const result = centsValue(group.costos);
+    sheet.getCell(row, 4).value = group.categoria;
+    sheet.getCell(row, 5).value = {
+      formula: `SUMIFS(Detalle!${detailColumnLetters.costo}:${detailColumnLetters.costo},Detalle!${detailColumnLetters.categoria}:${detailColumnLetters.categoria},D${row})`,
+      result,
+    };
+    sheet.getCell(row, 5).numFmt = '#,##0;(#,##0)';
+  });
+
+  ['Cultivo', 'Ingresos', 'Costos', 'Ganancia', 'Margen'].forEach((header, index) => {
+    sheet.getCell(1, 7 + index).value = header;
+  });
+  model.groups.byCrop.forEach((group, index) => {
+    const row = index + 2;
+    const income = centsValue(group.ingresos);
+    const costs = centsValue(group.costos);
+    const profit = centsValue(group.ganancia);
+    sheet.getCell(row, 7).value = group.cultivo;
+    sheet.getCell(row, 8).value = {
+      formula: `SUMIFS(Detalle!${detailColumnLetters.ingreso}:${detailColumnLetters.ingreso},Detalle!${detailColumnLetters.cultivo}:${detailColumnLetters.cultivo},G${row})`,
+      result: income,
+    };
+    sheet.getCell(row, 9).value = {
+      formula: `SUMIFS(Detalle!${detailColumnLetters.costo}:${detailColumnLetters.costo},Detalle!${detailColumnLetters.cultivo}:${detailColumnLetters.cultivo},G${row})`,
+      result: costs,
+    };
+    sheet.getCell(row, 10).value = { formula: `H${row}-I${row}`, result: profit };
+    sheet.getCell(row, 11).value = {
+      formula: `IF(H${row}=0,0,J${row}/H${row})`,
+      result: group.margen,
+    };
+    for (const column of [8, 9, 10]) sheet.getCell(row, column).numFmt = '#,##0;(#,##0)';
+    sheet.getCell(row, 11).numFmt = '0.00%;(0.00%)';
+  });
+
+  for (const rowNumber of [1, 2]) {
+    sheet.getRow(rowNumber).font = { bold: true };
+  }
+  sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+  sheet.getCell('D1').font = { bold: true };
+  sheet.getRow(2).font = { bold: true };
+  sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF395D4A' } };
+}
+
+async function buildCostsExcel(model) {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'AgroGestión';
+  workbook.created = new Date(model.meta.generatedAt);
+  workbook.calcProperties = { fullCalcOnLoad: true, forceFullCalc: true };
+  const detail = workbook.addWorksheet('Detalle');
+  const columns = model.columns;
+  detail.columns = columns.map((column) => ({
+    header: column.header,
+    key: column.key,
+    width: column.width,
+  }));
+  detail.views = [{ state: 'frozen', ySplit: 1 }];
+  const columnIndex = Object.fromEntries(columns.map((column, index) => [column.key, index + 1]));
+  const letters = Object.fromEntries(columns.map((column) => [
+    column.key,
+    detail.getColumn(indexOfKey(columns, column.key) + 1).letter,
+  ]));
+
+  const tableRows = model.rows.map((row) => columns.map((column) => {
+      if (column.key === 'fecha') return excelDateFromISO(row.fecha);
+      if (column.key === 'costo' || column.key === 'ingreso' || column.key === 'valor_unitario') {
+        return row[column.key] == null ? null : centsValue(row[column.key]);
+      }
+      if (column.key === 'cantidad') return row.cantidad == null ? null : Number(row.cantidad);
+      if (column.key === 'ganancia' || column.key === 'margen') return null;
+      return row[column.key] ?? null;
+    }));
+  detail.addTable({
+    name: 'CostosDetalle',
+    ref: 'A1',
+    headerRow: true,
+    totalsRow: false,
+    style: { theme: 'TableStyleMedium4', showRowStripes: true },
+    columns: columns.map((column) => ({ name: column.header, filterButton: true })),
+    rows: tableRows,
+  });
+
+  for (const [rowIndex, row] of model.rows.entries()) {
+    const rowNumber = rowIndex + 2;
+    for (const column of columns) {
+      const cell = detail.getCell(rowNumber, columnIndex[column.key]);
+      if (column.type === 'date') cell.numFmt = 'dd/mm/yyyy';
+      if (column.type === 'money') cell.numFmt = '#,##0;(#,##0)';
+      if (column.type === 'percent') cell.numFmt = '0.00%;(0.00%)';
+      if (column.type === 'number') cell.numFmt = '#,##0.###';
+      if (column.key === 'ganancia') {
+        const incomeCell = `${letters.ingreso}${rowNumber}`;
+        const costCell = `${letters.costo}${rowNumber}`;
+        cell.value = { formula: `${incomeCell}-${costCell}`, result: centsValue(row.ganancia) };
+      }
+      if (column.key === 'margen') {
+        const incomeCell = `${letters.ingreso}${rowNumber}`;
+        const profitCell = `${letters.ganancia}${rowNumber}`;
+        cell.value = {
+          formula: `IF(${incomeCell}=0,0,${profitCell}/${incomeCell})`,
+          result: row.margen,
+        };
+      }
+    }
+  }
+
+  const firstDataRow = 2;
+  const lastDataRow = model.rows.length + 1;
+  const totalValues = columns.map((column, index) => {
+    if (column.key === 'rowId') return 'TOTAL';
+    if (column.total !== 'sum') return null;
+    const letter = detail.getColumn(index + 1).letter;
+    const resultKey = column.key === 'costo' ? 'costos' : column.key === 'ingreso' ? 'ingresos' : 'ganancia';
+    return model.rows.length
+      ? {
+          formula: `SUBTOTAL(109,${letter}${firstDataRow}:${letter}${lastDataRow})`,
+          result: centsValue(model.totals[resultKey]),
+        }
+      : { formula: 'SUM(0)', result: 0 };
+  });
+  const totalsRow = detail.addRow(totalValues);
+  totalsRow.font = { bold: true };
+  for (const column of columns) {
+    if (column.type === 'money') totalsRow.getCell(columnIndex[column.key]).numFmt = '#,##0;(#,##0)';
+    if (column.type === 'percent') totalsRow.getCell(columnIndex[column.key]).numFmt = '0.00%;(0.00%)';
+  }
+  addModelSummary(workbook, model, totalsRow.number, {
+    ingreso: letters.ingreso,
+    costo: letters.costo,
+    ganancia: letters.ganancia,
+    categoria: letters.categoria,
+    cultivo: letters.cultivo,
+    etapa: letters.etapa,
+  });
+
+  const technical = workbook.addWorksheet('Detalle técnico');
+  technical.columns = model.technicalColumns.map((column) => ({
+    header: column.header,
+    key: column.key,
+    width: column.width,
+  }));
+  technical.views = [{ state: 'frozen', ySplit: 1 }];
+  for (const row of model.rows.filter((item) => item.kind === 'cost')) {
+    technical.addRow(Object.fromEntries(model.technicalColumns.map((column) => [
+      column.key,
+      column.key === 'porcentaje_prorrateo' && row[column.key] != null
+        ? Number(row[column.key]) / 100
+        : row[column.key] ?? null,
+    ])));
+  }
+  technical.getRow(1).font = { bold: true };
+  technical.autoFilter = {
+    from: { row: 1, column: 1 },
+    to: { row: Math.max(1, technical.rowCount), column: model.technicalColumns.length },
+  };
+  for (const [index, column] of model.technicalColumns.entries()) {
+    if (column.type === 'percent') {
+      technical.getColumn(index + 1).numFmt = '0.00%;(0.00%)';
+    }
+  }
+
+  return Buffer.from(await workbook.xlsx.writeBuffer());
+}
+
+function indexOfKey(columns, key) {
+  return columns.findIndex((column) => column.key === key);
+}
+
+function pdfRowForModel(row) {
+  return [
+    dateForPDF(row.fecha),
+    row.cultivo,
+    row.categoria,
+    row.concepto,
+    row.cantidad == null ? '' : new Intl.NumberFormat('es-CO', { maximumFractionDigits: 3 }).format(Number(row.cantidad)),
+    row.unidad || '',
+    row.valor_unitario == null ? '' : reportNumberFormat(row.valor_unitario),
+    reportNumberFormat(row.costo),
+    reportNumberFormat(row.ingreso),
+    reportNumberFormat(row.ganancia),
+    `${(row.margen * 100).toFixed(2)}%`,
+  ];
+}
+
+function buildCostsPdf(model) {
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'letter' });
+  const margin = 30;
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const totals = modelTotals(model);
+  const header = () => {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.text(model.meta.finca || 'Finca no especificada', margin, 22);
+    doc.text(model.meta.reportName, pageWidth / 2, 22, { align: 'center' });
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    const period = `${model.meta.period.from || 'Sin inicio'} a ${model.meta.period.to || 'Sin fin'}`;
+    doc.text('Razón social/NIT: pendientes de configurar', margin, 36);
+    doc.text(`Periodo: ${period} · Moneda: COP`, margin, 49);
+  };
+  const drawPageHeader = () => header();
+  const filterText = reportFiltersText(model.meta);
+
+  header();
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(12);
+  doc.text('Resumen ejecutivo', margin, 76);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.text(`Ingresos: COP ${reportNumberFormat(model.totals.ingresos)}`, margin, 96);
+  doc.text(`Costos: COP ${reportNumberFormat(model.totals.costos)}`, margin + 210, 96);
+  doc.text(`Ganancia: COP ${reportNumberFormat(model.totals.ganancia)}`, margin + 420, 96);
+  doc.text(`Margen: ${(model.totals.margen * 100).toFixed(2)}%`, margin + 640, 96);
+  doc.text(`Registros: ${model.totals.registroCount}`, margin, 114);
+
+  autoTable(doc, {
+    head: [['Costos por categoría', 'Total COP']],
+    body: model.groups.byCategory.map((group) => [group.categoria, reportNumberFormat(group.costos)]),
+    startY: 132,
+    margin: { top: 65, right: margin, bottom: 38, left: margin },
+    styles: { font: 'helvetica', fontSize: 8, cellPadding: 4, lineColor: [190, 190, 190], lineWidth: 0.3 },
+    headStyles: { fillColor: [90, 90, 90], textColor: 255 },
+    columnStyles: { 1: { halign: 'right' } },
+    didDrawPage: drawPageHeader,
+  });
+  const cropSummary = model.groups.byCrop.map((group) => [
+    group.cultivo,
+    reportNumberFormat(group.ingresos),
+    reportNumberFormat(group.costos),
+    reportNumberFormat(group.ganancia),
+  ]);
+  autoTable(doc, {
+    head: [['Cultivo/Lote', 'Ingresos COP', 'Costos COP', 'Ganancia COP']],
+    body: cropSummary,
+    startY: (doc.lastAutoTable?.finalY || 132) + 18,
+    margin: { top: 65, right: margin, bottom: 38, left: margin },
+    styles: { font: 'helvetica', fontSize: 8, cellPadding: 4, lineColor: [190, 190, 190], lineWidth: 0.3 },
+    headStyles: { fillColor: [90, 90, 90], textColor: 255 },
+    columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' } },
+    didDrawPage: drawPageHeader,
+  });
+  doc.addPage('letter', 'landscape');
+
+  const body = [];
+  const subtotalRows = new Set();
+  const rowsByGroup = new Map();
+  for (const row of model.rows) {
+    const key = row.cultivo;
+    if (!rowsByGroup.has(key)) rowsByGroup.set(key, []);
+    rowsByGroup.get(key).push(row);
+  }
+  for (const group of model.groups.byCrop) {
+    const key = group.groupId;
+    const groupRows = rowsByGroup.get(key) || [];
+    body.push([group.cultivo, '', '', '', '', '', '', '', '', '', '']);
+    for (const row of groupRows) body.push(pdfRowForModel(row));
+    const subtotal = [
+      `Subtotal ${group.cultivo}`,
+      '', '', '', '', '', '',
+      reportNumberFormat(group.costos),
+      reportNumberFormat(group.ingresos),
+      reportNumberFormat(group.ganancia),
+      `${(group.margen * 100).toFixed(2)}%`,
+    ];
+    subtotalRows.add(body.length);
+    body.push(subtotal);
+  }
+  const totalRow = [
+    'TOTAL GENERAL', '', '', '', '', '', '',
+    reportNumberFormat(model.totals.costos),
+    reportNumberFormat(model.totals.ingresos),
+    reportNumberFormat(model.totals.ganancia),
+    `${(model.totals.margen * 100).toFixed(2)}%`,
+  ];
+  subtotalRows.add(body.length);
+  body.push(totalRow);
+  autoTable(doc, {
+    head: [model.columns.filter((column) => column.key !== 'rowId').map((column) => column.header)],
+    body,
+    startY: 68,
+    margin: { top: 62, right: margin, bottom: 40, left: margin },
+    styles: {
+      font: 'helvetica',
+      fontSize: 7,
+      cellPadding: 3,
+      overflow: 'linebreak',
+      lineColor: [195, 195, 195],
+      lineWidth: 0.25,
+    },
+    headStyles: { fillColor: [90, 90, 90], textColor: 255, fontStyle: 'bold' },
+    columnStyles: {
+      0: { halign: 'center' },
+      4: { halign: 'right' },
+      6: { halign: 'right' },
+      7: { halign: 'right' },
+      8: { halign: 'right' },
+      9: { halign: 'right' },
+      10: { halign: 'center' },
+    },
+    rowPageBreak: 'avoid',
+    showHead: 'everyPage',
+    didDrawPage: drawPageHeader,
+    didParseCell: (hook) => {
+      if (hook.section === 'body' && subtotalRows.has(hook.row.index)) {
+        hook.cell.styles.fontStyle = 'bold';
+        hook.cell.styles.fillColor = hook.row.index === body.length - 1 ? [215, 215, 215] : [240, 240, 240];
+      }
+    },
+    didDrawCell: (hook) => {
+      if (hook.section === 'body' && hook.row.index === body.length - 1 && hook.column.index === 0) {
+        const y = hook.cell.y;
+        doc.setDrawColor(45, 45, 45);
+        doc.setLineWidth(0.7);
+        doc.line(margin, y - 3, pageWidth - margin, y - 3);
+        doc.line(margin, y - 5, pageWidth - margin, y - 5);
+      }
+    },
+  });
+
+  doc.addPage('letter', 'landscape');
+  header();
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.text('Notas y filtros aplicados', margin, 78);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  const notes = doc.splitTextToSize(
+    `Filtros: ${filterText}\nPeriodo de costos: ${model.meta.period.from || 'Sin inicio'} a ${model.meta.period.to || 'Sin fin'}\nLos ingresos corresponden a cosechas del mismo cultivo, etapa y periodo. Los costos generales sin prorratear se conservan como grupo separado y se incluyen en el total general.\nRazón social y NIT no están configurados en el sistema.`,
+    pageWidth - margin * 2
+  );
+  doc.text(notes, margin, 98);
+
+  const generatedLabel = new Intl.DateTimeFormat('es-CO', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+    timeZone: 'America/Bogota',
+  }).format(new Date(model.meta.generatedAt));
+  const pageCount = doc.internal.getNumberOfPages();
+  for (let page = 1; page <= pageCount; page += 1) {
+    doc.setPage(page);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7);
+    doc.text(
+      `Generado: ${generatedLabel} · Usuario: ${model.meta.usuario || 'No especificado'} · ID: ${model.meta.traceId || 'No disponible'} · Página ${page} de ${pageCount}`,
+      pageWidth / 2,
+      pageHeight - 18,
+      { align: 'center' }
+    );
+  }
+  return Buffer.from(doc.output('arraybuffer'));
+}
+
+export async function generateReportExport({ reportType, format, rows, filters, context, model }) {
+  if (reportType === 'costos' && model && format === 'xlsx') {
+    const buffer = await buildCostsExcel(model);
+    return {
+      buffer,
+      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      extension: 'xlsx',
+      rowCount: model.rows.length,
+    };
+  }
+  if (reportType === 'costos' && model && format === 'pdf') {
+    return {
+      buffer: buildCostsPdf(model),
+      contentType: 'application/pdf',
+      extension: 'pdf',
+      rowCount: model.rows.length,
+    };
+  }
   const generatedAt = new Date();
   if (format === 'csv') {
     return {

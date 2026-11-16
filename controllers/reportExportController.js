@@ -1,5 +1,5 @@
 import * as reportExportModel from '../models/reportExportModel.js';
-import { fetchReportData } from '../models/reportModel.js';
+import { buildReportModel, fetchReportData } from '../models/reportModel.js';
 import { generateReportExport } from '../services/reportExportService.js';
 
 const reportTypes = new Set(['por-cultivo', 'costos', 'produccion', 'rentabilidad', 'trabajador']);
@@ -96,22 +96,44 @@ export async function postReportExport(req, res) {
 
     const filtros = normalizeExportFilters(req.body?.filtros);
     const context = await reportExportModel.getReportExportContext(userId, filtros.fincaId);
-    const rows = await fetchReportData(tipo, filtros);
-    const report = await generateReportExport({
-      reportType: tipo,
-      format: formato,
-      rows,
-      filters: filtros,
-      context,
-    });
-    await reportExportModel.recordReportExport({
-      userId,
-      fincaId: filtros.fincaId,
-      reportType: tipo,
-      format: formato,
-      filters: filtros,
-      rowCount: report.rowCount,
-    });
+    let report;
+    if (tipo === 'costos' && ['xlsx', 'pdf'].includes(formato)) {
+      const model = await buildReportModel(tipo, filtros, context);
+      const traceId = await reportExportModel.recordReportExport({
+        userId,
+        fincaId: filtros.fincaId,
+        reportType: tipo,
+        format: formato,
+        filters: filtros,
+        rowCount: model.totals.registroCount,
+      });
+      model.meta.traceId = traceId;
+      report = await generateReportExport({
+        reportType: tipo,
+        format: formato,
+        rows: model.rows,
+        filters: filtros,
+        context,
+        model,
+      });
+    } else {
+      const rows = await fetchReportData(tipo, filtros);
+      report = await generateReportExport({
+        reportType: tipo,
+        format: formato,
+        rows,
+        filters: filtros,
+        context,
+      });
+      await reportExportModel.recordReportExport({
+        userId,
+        fincaId: filtros.fincaId,
+        reportType: tipo,
+        format: formato,
+        filters: filtros,
+        rowCount: report.rowCount,
+      });
+    }
 
     const filename = `reporte-${tipo}-${new Date().toISOString().slice(0, 10)}.${report.extension}`;
     res.setHeader('Content-Type', report.contentType);
