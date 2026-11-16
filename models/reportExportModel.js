@@ -30,7 +30,6 @@ export async function getReportExportContext(userId, fincaId) {
 }
 
 export async function recordReportExport({
-  userId,
   fincaId,
   reportType,
   format,
@@ -38,12 +37,25 @@ export async function recordReportExport({
   rowCount,
 }) {
   const result = await pool.query(
-    `INSERT INTO auditoria_exportaciones (
-       id_usuario, idfinca, tipo_reporte, formato, filtros, numero_filas
-     )
-     VALUES ($1, $2, $3, $4, $5::jsonb, $6)
-     RETURNING id_exportacion AS id`,
-    [userId, fincaId, reportType, format, JSON.stringify(filters), rowCount]
+    `SELECT public.fn_auditoria_registrar_evento(
+       $1::text,
+       'EXPORTACION'::text,
+       'reportes'::text,
+       NULL::bigint,
+       $2::text,
+       $3::jsonb
+     ) AS id`,
+    [
+      'REPORTES',
+      `Exportación ${reportType} (${format}) para finca ${fincaId}; filas: ${rowCount}.`,
+      JSON.stringify({
+        fincaId,
+        tipoReporte: reportType,
+        formato: format,
+        filtros,
+        numeroFilas: rowCount,
+      }),
+    ]
   );
   return result.rows[0].id;
 }

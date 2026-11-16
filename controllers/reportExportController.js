@@ -100,7 +100,6 @@ export async function postReportExport(req, res) {
     if (tipo === 'costos' && ['xlsx', 'pdf'].includes(formato)) {
       const model = await buildReportModel(tipo, filtros, context);
       const traceId = await reportExportModel.recordReportExport({
-        userId,
         fincaId: filtros.fincaId,
         reportType: tipo,
         format: formato,
@@ -126,7 +125,6 @@ export async function postReportExport(req, res) {
         context,
       });
       await reportExportModel.recordReportExport({
-        userId,
         fincaId: filtros.fincaId,
         reportType: tipo,
         format: formato,
