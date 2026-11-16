@@ -521,7 +521,10 @@ export async function deleteOrDeactivateEtapaById(idetapaCultivo) {
 export async function fetchTiposCultivo() {
   try {
     const result = await pool.query(
-      'SELECT idtipocultivo AS id, nombre FROM tipos_cultivo WHERE estado_registro = 1 ORDER BY nombre'
+      `SELECT tc.idtipocultivo AS id, tc.nombre
+       FROM public.tipos_cultivo tc
+       WHERE COALESCE(to_jsonb(tc) ->> 'estado_registro', '1') = '1'
+       ORDER BY tc.nombre`
     );
     return result.rows;
   } catch (error) {
