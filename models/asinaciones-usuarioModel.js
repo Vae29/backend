@@ -1,6 +1,20 @@
 import pool, { getRequestDatabaseClient } from '../config/db.js';
 import { toDatabaseRegistroState } from '../utils/registroEstado.js';
 
+async function hasPublicColumn(tableName, columnName) {
+  const result = await pool.query(
+    `SELECT EXISTS (
+       SELECT 1
+       FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND table_name = $1
+         AND column_name = $2
+     ) AS available`,
+    [tableName, columnName]
+  )
+  return Boolean(result.rows[0]?.available)
+}
+
 async function assertManualMateriaPrimaNotUsed(subcategoryId, costId = null) {
   const migration = await pool.query(
     `SELECT EXISTS (
@@ -794,29 +808,52 @@ export async function validateCultivoCanAddCosecha(idcultivo) {
 
 export async function fetchCosechasPorCultivo(idcultivo) {
   try {
-    const result = await pool.query(
-      `SELECT
-         c.idcosecha AS id,
-         c.idcultivo,
-         c.idetapa_cultivo AS "etapaId",
-         et.nombre_etapa AS etapa,
-         c.fecha_cosecha AS fecha,
-         c.cantidad_cosechada AS cantidad,
-         c.precio_unitario AS precio,
-         c.idunidadmedida AS unidadMedidaId,
-         um.nombre AS unidad,
-         c.idtipoprecio AS tipoPrecioId,
-         tp.nombre AS tipoPrecio,
-         CASE WHEN c.estado_registro = 1 THEN 'ACTIVO' ELSE 'ANULADO' END AS estado_registro
-       FROM cosecha c
-       LEFT JOIN unidades_medidas um ON c.idunidadmedida = um.idunidadmedida
-       LEFT JOIN tipo_precio tp ON c.idtipoprecio = tp.idtipoprecio
-       LEFT JOIN etapa_cultivo ec ON ec.idetapacultivo = c.idetapa_cultivo
-       LEFT JOIN etapas et ON et.idetapa = ec.idetapa
-       WHERE c.idcultivo = $1
-       ORDER BY c.fecha_cosecha DESC`,
-      [idcultivo]
-    );
+    const hasHarvestStage = await hasPublicColumn('cosecha', 'idetapa_cultivo')
+    const result = hasHarvestStage
+      ? await pool.query(
+        `SELECT
+           c.idcosecha AS id,
+           c.idcultivo,
+           c.idetapa_cultivo AS "etapaId",
+           et.nombre_etapa AS etapa,
+           c.fecha_cosecha AS fecha,
+           c.cantidad_cosechada AS cantidad,
+           c.precio_unitario AS precio,
+           c.idunidadmedida AS unidadMedidaId,
+           um.nombre AS unidad,
+           c.idtipoprecio AS tipoPrecioId,
+           tp.nombre AS tipoPrecio,
+           CASE WHEN c.estado_registro = 1 THEN 'ACTIVO' ELSE 'ANULADO' END AS estado_registro
+         FROM public.cosecha c
+         LEFT JOIN public.unidades_medidas um ON c.idunidadmedida = um.idunidadmedida
+         LEFT JOIN public.tipo_precio tp ON c.idtipoprecio = tp.idtipoprecio
+         LEFT JOIN public.etapa_cultivo ec ON ec.idetapacultivo = c.idetapa_cultivo
+         LEFT JOIN public.etapas et ON et.idetapa = ec.idetapa
+         WHERE c.idcultivo = $1
+         ORDER BY c.fecha_cosecha DESC`,
+        [idcultivo]
+      )
+      : await pool.query(
+        `SELECT
+           c.idcosecha AS id,
+           c.idcultivo,
+           NULL::integer AS "etapaId",
+           NULL::text AS etapa,
+           c.fecha_cosecha AS fecha,
+           c.cantidad_cosechada AS cantidad,
+           c.precio_unitario AS precio,
+           c.idunidadmedida AS unidadMedidaId,
+           um.nombre AS unidad,
+           c.idtipoprecio AS tipoPrecioId,
+           tp.nombre AS tipoPrecio,
+           CASE WHEN c.estado_registro = 1 THEN 'ACTIVO' ELSE 'ANULADO' END AS estado_registro
+         FROM public.cosecha c
+         LEFT JOIN public.unidades_medidas um ON c.idunidadmedida = um.idunidadmedida
+         LEFT JOIN public.tipo_precio tp ON c.idtipoprecio = tp.idtipoprecio
+         WHERE c.idcultivo = $1
+         ORDER BY c.fecha_cosecha DESC`,
+        [idcultivo]
+      )
     return result.rows;
   } catch (error) {
     console.error('Error fetching cosechas por cultivo:', error);
@@ -850,15 +887,32 @@ export async function fetchTiposPrecio() {
 
 export async function createCosecha({ idcultivo, idetapa_cultivo, cantidad_cosechada, idunidadmedida, precio_unitario, idtipo_precio }) {
   try {
-    const result = await pool.query(
-      `INSERT INTO cosecha (idcultivo, idetapa_cultivo, cantidad_cosechada, idunidadmedida, precio_unitario, idtipoprecio, fecha_cosecha)
-       VALUES ($1, $2, $3, $4, $5, $6, CURRENT_DATE)
-       RETURNING idcosecha AS id, idcultivo, idetapa_cultivo AS "etapaId",
-                 cantidad_cosechada AS cantidad, idunidadmedida,
-                 precio_unitario AS precio, idtipoprecio AS "tipoPrecioId",
-                 fecha_cosecha AS fecha`,
-      [idcultivo, idetapa_cultivo, cantidad_cosechada, idunidadmedida, precio_unitario, idtipo_precio]
-    );
+    const hasHarvestStage = await hasPublicColumn('cosecha', 'idetapa_cultivo')
+    const result = hasHarvestStage
+      ? await pool.query(
+        `INSERT INTO public.cosecha (
+           idcultivo, idetapa_cultivo, cantidad_cosechada,
+           idunidadmedida, precio_unitario, idtipoprecio, fecha_cosecha
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, CURRENT_DATE)
+         RETURNING idcosecha AS id, idcultivo, idetapa_cultivo AS "etapaId",
+                   cantidad_cosechada AS cantidad, idunidadmedida,
+                   precio_unitario AS precio, idtipoprecio AS "tipoPrecioId",
+                   fecha_cosecha AS fecha`,
+        [idcultivo, idetapa_cultivo, cantidad_cosechada, idunidadmedida, precio_unitario, idtipo_precio]
+      )
+      : await pool.query(
+        `INSERT INTO public.cosecha (
+           idcultivo, cantidad_cosechada, idunidadmedida,
+           precio_unitario, idtipoprecio, fecha_cosecha
+         )
+         VALUES ($1, $2, $3, $4, $5, CURRENT_DATE)
+         RETURNING idcosecha AS id, idcultivo, NULL::integer AS "etapaId",
+                   cantidad_cosechada AS cantidad, idunidadmedida,
+                   precio_unitario AS precio, idtipoprecio AS "tipoPrecioId",
+                   fecha_cosecha AS fecha`,
+        [idcultivo, cantidad_cosechada, idunidadmedida, precio_unitario, idtipo_precio]
+      )
     return result.rows[0];
   } catch (error) {
     console.error('Error creating cosecha:', error);

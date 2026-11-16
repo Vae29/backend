@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import pool from '../config/db.js'
 import {
+  createCosecha,
+  fetchCosechasPorCultivo,
   fetchAllEtapasCatalog,
   FINCAS_POR_USUARIO_QUERY,
   validateEtapaAllowedForCultivo,
@@ -54,6 +56,56 @@ test('stage assignment allows existing stages when type-stage mappings are unava
     assert.equal(queries.length, 2)
     assert.doesNotMatch(queries[1].query, /etapas_tipo_cultivo/)
     assert.deepEqual(queries[1].params, [8, 3])
+  } finally {
+    pool.query = originalQuery
+  }
+})
+
+test('harvest listing supports schemas without a stage association column', async () => {
+  const originalQuery = pool.query
+  const queries = []
+  pool.query = async (query) => {
+    queries.push(query)
+    if (query.includes('information_schema.columns')) {
+      return { rows: [{ available: false }] }
+    }
+    return { rows: [{ id: 4, idcultivo: 2, etapaId: null }] }
+  }
+
+  try {
+    const harvests = await fetchCosechasPorCultivo(2)
+    assert.deepEqual(harvests, [{ id: 4, idcultivo: 2, etapaId: null }])
+    assert.equal(queries.length, 2)
+    assert.doesNotMatch(queries[1], /c\.idetapa_cultivo/)
+  } finally {
+    pool.query = originalQuery
+  }
+})
+
+test('harvest creation omits the unavailable stage association column', async () => {
+  const originalQuery = pool.query
+  const queries = []
+  pool.query = async (query, params) => {
+    queries.push({ query, params })
+    if (query.includes('information_schema.columns')) {
+      return { rows: [{ available: false }] }
+    }
+    return { rows: [{ id: 5, idcultivo: 2, etapaId: null }] }
+  }
+
+  try {
+    const harvest = await createCosecha({
+      idcultivo: 2,
+      idetapa_cultivo: 7,
+      cantidad_cosechada: 14,
+      idunidadmedida: 3,
+      precio_unitario: 1200,
+      idtipo_precio: 1,
+    })
+    assert.deepEqual(harvest, { id: 5, idcultivo: 2, etapaId: null })
+    assert.equal(queries.length, 2)
+    assert.doesNotMatch(queries[1].query, /idetapa_cultivo/)
+    assert.deepEqual(queries[1].params, [2, 14, 3, 1200, 1])
   } finally {
     pool.query = originalQuery
   }
