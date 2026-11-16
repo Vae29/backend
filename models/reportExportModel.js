@@ -52,7 +52,7 @@ export async function recordReportExport({
         fincaId,
         tipoReporte: reportType,
         formato: format,
-        filtros,
+        filtros: filters,
         numeroFilas: rowCount,
       }),
     ]
