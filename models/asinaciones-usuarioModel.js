@@ -287,24 +287,36 @@ export async function fetchEtapasPorCultivo(idcultivo) {
 
 export async function fetchAllEtapasCatalog(tipoCultivoId = null) {
   try {
-    const result = await pool.query(
-      `SELECT et.idetapa AS id, et.nombre_etapa AS nombre
-       FROM etapas et
-       WHERE et.estado_registro = 1
-         AND ($1::int IS NULL
-          OR NOT EXISTS (
-            SELECT 1 FROM etapas_tipo_cultivo etc
-            WHERE etc.idtipocultivo = $1 AND etc.estado_registro = 1
-          )
-          OR EXISTS (
-            SELECT 1 FROM etapas_tipo_cultivo etc
-            WHERE etc.idtipocultivo = $1
-              AND etc.idetapa = et.idetapa
-              AND etc.estado_registro = 1
-          ))
-       ORDER BY et.nombre_etapa`,
-      [tipoCultivoId]
+    const mappingTable = await pool.query(
+      `SELECT to_regclass('public.etapas_tipo_cultivo') IS NOT NULL AS available`
     )
+    const hasTypeStageMapping = mappingTable.rows[0].available
+    const result = hasTypeStageMapping
+      ? await pool.query(
+        `SELECT et.idetapa AS id, et.nombre_etapa AS nombre
+         FROM public.etapas et
+         WHERE COALESCE(to_jsonb(et) ->> 'estado_registro', '1') = '1'
+           AND ($1::int IS NULL
+            OR NOT EXISTS (
+              SELECT 1 FROM public.etapas_tipo_cultivo etc
+              WHERE etc.idtipocultivo = $1
+                AND COALESCE(to_jsonb(etc) ->> 'estado_registro', '1') = '1'
+            )
+            OR EXISTS (
+              SELECT 1 FROM public.etapas_tipo_cultivo etc
+              WHERE etc.idtipocultivo = $1
+                AND etc.idetapa = et.idetapa
+                AND COALESCE(to_jsonb(etc) ->> 'estado_registro', '1') = '1'
+            ))
+         ORDER BY et.nombre_etapa`,
+        [tipoCultivoId]
+      )
+      : await pool.query(
+        `SELECT et.idetapa AS id, et.nombre_etapa AS nombre
+         FROM public.etapas et
+         WHERE COALESCE(to_jsonb(et) ->> 'estado_registro', '1') = '1'
+         ORDER BY et.nombre_etapa`
+      )
     return result.rows
   } catch (error) {
     console.error('Error fetching etapas catalog:', error)
