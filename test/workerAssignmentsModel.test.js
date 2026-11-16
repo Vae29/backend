@@ -4,6 +4,7 @@ import pool from '../config/db.js'
 import {
   fetchAllEtapasCatalog,
   FINCAS_POR_USUARIO_QUERY,
+  validateEtapaAllowedForCultivo,
 } from '../models/asinaciones-usuarioModel.js'
 
 test('worker farm query includes directly assigned farms', () => {
@@ -32,6 +33,27 @@ test('stage catalog uses existing stages when type-stage mappings are unavailabl
     assert.equal(queries.length, 2)
     assert.match(queries[1], /FROM public\.etapas et/)
     assert.doesNotMatch(queries[1], /etapas_tipo_cultivo/)
+  } finally {
+    pool.query = originalQuery
+  }
+})
+
+test('stage assignment allows existing stages when type-stage mappings are unavailable', async () => {
+  const originalQuery = pool.query
+  const queries = []
+  pool.query = async (query, params) => {
+    queries.push({ query, params })
+    if (query.includes("to_regclass('public.etapas_tipo_cultivo')")) {
+      return { rows: [{ available: false }] }
+    }
+    return { rows: [{ allowed: true }] }
+  }
+
+  try {
+    assert.equal(await validateEtapaAllowedForCultivo(8, 3), true)
+    assert.equal(queries.length, 2)
+    assert.doesNotMatch(queries[1].query, /etapas_tipo_cultivo/)
+    assert.deepEqual(queries[1].params, [8, 3])
   } finally {
     pool.query = originalQuery
   }

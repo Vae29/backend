@@ -285,12 +285,16 @@ export async function fetchEtapasPorCultivo(idcultivo) {
   }
 }
 
+async function hasTypeStageMappingTable() {
+  const result = await pool.query(
+    `SELECT to_regclass('public.etapas_tipo_cultivo') IS NOT NULL AS available`
+  )
+  return Boolean(result.rows[0]?.available)
+}
+
 export async function fetchAllEtapasCatalog(tipoCultivoId = null) {
   try {
-    const mappingTable = await pool.query(
-      `SELECT to_regclass('public.etapas_tipo_cultivo') IS NOT NULL AS available`
-    )
-    const hasTypeStageMapping = mappingTable.rows[0].available
+    const hasTypeStageMapping = await hasTypeStageMappingTable()
     const result = hasTypeStageMapping
       ? await pool.query(
         `SELECT et.idetapa AS id, et.nombre_etapa AS nombre
@@ -325,32 +329,49 @@ export async function fetchAllEtapasCatalog(tipoCultivoId = null) {
 }
 
 export async function validateEtapaAllowedForCultivo(idcultivo, idetapa) {
+  const hasTypeStageMapping = await hasTypeStageMappingTable()
+  if (!hasTypeStageMapping) {
+    const result = await pool.query(
+      `SELECT EXISTS (
+         SELECT 1
+         FROM public.cultivo c
+         JOIN public.etapas et ON et.idetapa = $2
+         WHERE c.idcultivo = $1
+           AND c.estado_registro = 1
+           AND COALESCE(to_jsonb(et) ->> 'estado_registro', '1') = '1'
+       ) AS allowed`,
+      [idcultivo, idetapa]
+    )
+    return result.rows[0].allowed
+  }
+
   const result = await pool.query(
     `SELECT
        EXISTS (
-         SELECT 1 FROM etapas_tipo_cultivo etc
+         SELECT 1 FROM public.etapas_tipo_cultivo etc
          WHERE etc.idtipocultivo = c.idtipocultivo
-           AND etc.estado_registro = 1
+           AND COALESCE(to_jsonb(etc) ->> 'estado_registro', '1') = '1'
        ) AS has_configured_stages,
        EXISTS (
-         SELECT 1 FROM etapas_tipo_cultivo etc
+         SELECT 1 FROM public.etapas_tipo_cultivo etc
          WHERE etc.idtipocultivo = c.idtipocultivo
            AND etc.idetapa = $2
-           AND etc.estado_registro = 1
+           AND COALESCE(to_jsonb(etc) ->> 'estado_registro', '1') = '1'
        ) AS stage_is_configured,
        EXISTS (
-         SELECT 1 FROM etapas et
-         WHERE et.idetapa = $2 AND et.estado_registro = 1
+         SELECT 1 FROM public.etapas et
+         WHERE et.idetapa = $2
+           AND COALESCE(to_jsonb(et) ->> 'estado_registro', '1') = '1'
        ) AS stage_is_active
-     FROM cultivo c
+     FROM public.cultivo c
      WHERE c.idcultivo = $1 AND c.estado_registro = 1`,
     [idcultivo, idetapa]
-  );
-  const crop = result.rows[0];
+  )
+  const crop = result.rows[0]
   return Boolean(
     crop?.stage_is_active &&
     (!crop.has_configured_stages || crop.stage_is_configured)
-  );
+  )
 }
 
 export async function validateEtapaAllowedForEtapaCultivo(etapaCultivoId, idetapa) {
