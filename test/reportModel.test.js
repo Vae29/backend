@@ -129,6 +129,30 @@ test('crop cost unit uses all crop costs and only comparable base-unit productio
   assert.doesNotMatch(query, /sc\.incluir_costo_unitario/);
 });
 
+test('crop report supports the legacy schema without conversion, proration, or harvest-stage columns', () => {
+  const { query, params } = buildReportQuery('por-cultivo', { etapaId: 3 }, {
+    hasUnitConversions: false,
+    hasGeneralCostProration: false,
+    hasHarvestStage: false,
+  });
+
+  assert.deepEqual(params, [3]);
+  assert.doesNotMatch(query, /conversion_unidades_cultivo|prorrateo_costos_generales|cc\.idetapa_cultivo/);
+  assert.match(query, /COUNT\(DISTINCT cc\.idunidadmedida\) = 1/);
+  assert.match(query, /NULL::integer AS idetapa_cultivo/);
+});
+
+test('cost report supports the legacy schema without conversion or proration tables', () => {
+  const { query } = buildReportQuery('costos', {}, {
+    hasUnitConversions: false,
+    hasGeneralCostProration: false,
+    hasHarvestStage: false,
+  });
+
+  assert.doesNotMatch(query, /conversion_unidades_cultivo|prorrateo_costos_generales/);
+  assert.match(query, /NULL::text AS unidad_base/);
+});
+
 test('cost report tolerates optional accounting columns missing from the database schema', () => {
   const { query } = buildReportQuery('costos');
 

@@ -128,7 +128,7 @@ function addDateConditions(where, params, alias, column, filters) {
   }
 }
 
-function buildFilteredCrops(filters, params, includeBaseUnit = false) {
+function buildFilteredCrops(filters, params, includeBaseUnit = false, hasUnitConversions = true) {
   const where = [`cu.estado_registro = 1`];
 
   if (filters.fincaId) {
@@ -158,14 +158,16 @@ function buildFilteredCrops(filters, params, includeBaseUnit = false) {
     where.push(`LOWER(e.nombre) = LOWER($${params.length})`);
   }
 
-  const baseUnitSelection = includeBaseUnit
+  const baseUnitSelection = includeBaseUnit && hasUnitConversions
     ? `, (SELECT um.nombre
          FROM conversion_unidades_cultivo base_conv
          JOIN unidades_medidas um ON um.idunidadmedida = base_conv.idunidadmedida
          WHERE base_conv.idtipocultivo = cu.idtipocultivo
            AND base_conv.es_unidad_base = TRUE
          LIMIT 1) AS unidad_base`
-    : '';
+    : includeBaseUnit
+      ? ', NULL::text AS unidad_base'
+      : '';
 
   return `filtered_crops AS (
     SELECT cu.idcultivo, cu.nombre, cu.idestadocultivo AS idestado, e.nombre AS estado,
@@ -200,24 +202,36 @@ function buildCostConditions(filters, params) {
   return where.join(' AND ');
 }
 
-function buildHarvestConditions(filters, params) {
+function buildHarvestConditions(filters, params, hasHarvestStage = true) {
   const where = [`cc.estado_registro = 1`];
   if (filters.etapaId) {
-    params.push(filters.etapaId);
-    where.push(`EXISTS (
-      SELECT 1 FROM etapa_cultivo ec
-      WHERE ec.idetapacultivo = cc.idetapa_cultivo
-        AND ec.idetapa = $${params.length}
-    )`);
+    if (hasHarvestStage) {
+      params.push(filters.etapaId);
+      where.push(`EXISTS (
+        SELECT 1 FROM etapa_cultivo ec
+        WHERE ec.idetapacultivo = cc.idetapa_cultivo
+          AND ec.idetapa = $${params.length}
+      )`);
+    } else {
+      where.push('FALSE');
+    }
   }
   addDateConditions(where, params, 'cc', 'fecha_cosecha', filters);
   return where.join(' AND ');
 }
 
-export function buildReportQuery(reportType, rawFilters = {}) {
+export function buildReportQuery(reportType, rawFilters = {}, schemaCapabilities = {}) {
   const filters = normalizeFilters(rawFilters);
+  const hasUnitConversions = schemaCapabilities.hasUnitConversions !== false;
+  const hasGeneralCostProration = schemaCapabilities.hasGeneralCostProration !== false;
+  const hasHarvestStage = schemaCapabilities.hasHarvestStage !== false;
   const params = [];
-  const filteredCrops = buildFilteredCrops(filters, params, reportType === 'costos');
+  const filteredCrops = buildFilteredCrops(
+    filters,
+    params,
+    reportType === 'costos',
+    hasUnitConversions,
+  );
   const ctes = [filteredCrops];
   let costConditions;
 
@@ -228,6 +242,40 @@ export function buildReportQuery(reportType, rawFilters = {}) {
         ? `co.idfinca = $${params.indexOf(filters.fincaId) + 1}`
         : 'TRUE';
       const stageUnfiltered = filters.etapaId ? 'FALSE' : 'TRUE';
+      const allocatedGeneralCte = hasGeneralCostProration
+        ? `allocated_general AS (
+            SELECT gc.idcosto AS id_costo, fc.idcultivo AS id_cultivo,
+                   NULL::integer AS id_etapa_cultivo,
+                   COALESCE(gc.codigo_subcategoria, gc.codigo_categoria) AS codigo_contable,
+                   gc.categoria, gc.subcategoria, fc.nombre AS cultivo,
+                   fc.tipo_cultivo, fc.unidad_base, NULL::text AS etapa, NULL::integer AS "etapaId",
+                   gc.descripcion,
+                   round(gc.valor * p.porcentaje / 100, 2) AS valor,
+                   gc.fecha, 'PRORRATEADO'::text AS origen,
+                   p.porcentaje AS porcentaje_prorrateo
+            FROM general_costs gc
+            JOIN public.prorrateo_costos_generales p ON p.idfinca = gc.idfinca
+            JOIN filtered_crops fc ON fc.idcultivo = p.idcultivo
+            WHERE ${stageUnfiltered}
+          )`
+        : `allocated_general AS (
+            SELECT gc.idcosto AS id_costo, NULL::integer AS id_cultivo,
+                   NULL::integer AS id_etapa_cultivo,
+                   COALESCE(gc.codigo_subcategoria, gc.codigo_categoria) AS codigo_contable,
+                   gc.categoria, gc.subcategoria, NULL::text AS cultivo,
+                   NULL::text AS tipo_cultivo, NULL::text AS unidad_base,
+                   NULL::text AS etapa, NULL::integer AS "etapaId",
+                   gc.descripcion, NULL::numeric AS valor, gc.fecha,
+                   'PRORRATEADO'::text AS origen, NULL::numeric AS porcentaje_prorrateo
+            FROM general_costs gc
+            WHERE FALSE
+          )`;
+      const unallocatedGeneralCondition = hasGeneralCostProration
+        ? `AND NOT EXISTS (
+                SELECT 1 FROM public.prorrateo_costos_generales p
+                 WHERE p.idfinca = gc.idfinca
+              )`
+        : '';
       return {
         query: `WITH ${filteredCrops},
           general_costs AS (
@@ -264,21 +312,7 @@ export function buildReportQuery(reportType, rawFilters = {}) {
             LEFT JOIN categoria_costo cat ON cat.idcategoria = sc.idcategoria
             WHERE ${costConditions}
           ),
-          allocated_general AS (
-            SELECT gc.idcosto AS id_costo, fc.idcultivo AS id_cultivo,
-                   NULL::integer AS id_etapa_cultivo,
-                   COALESCE(gc.codigo_subcategoria, gc.codigo_categoria) AS codigo_contable,
-                   gc.categoria, gc.subcategoria, fc.nombre AS cultivo,
-                   fc.tipo_cultivo, fc.unidad_base, NULL::text AS etapa, NULL::integer AS "etapaId",
-                   gc.descripcion,
-                   round(gc.valor * p.porcentaje / 100, 2) AS valor,
-                   gc.fecha, 'PRORRATEADO'::text AS origen,
-                   p.porcentaje AS porcentaje_prorrateo
-            FROM general_costs gc
-            JOIN public.prorrateo_costos_generales p ON p.idfinca = gc.idfinca
-            JOIN filtered_crops fc ON fc.idcultivo = p.idcultivo
-            WHERE ${stageUnfiltered}
-          ),
+          ${allocatedGeneralCte},
           unallocated_general AS (
             SELECT gc.idcosto AS id_costo, NULL::integer AS id_cultivo,
                    NULL::integer AS id_etapa_cultivo,
@@ -290,10 +324,7 @@ export function buildReportQuery(reportType, rawFilters = {}) {
                    NULL::numeric AS porcentaje_prorrateo
             FROM general_costs gc
             WHERE ${stageUnfiltered}
-              AND NOT EXISTS (
-                SELECT 1 FROM public.prorrateo_costos_generales p
-                 WHERE p.idfinca = gc.idfinca
-              )
+              ${unallocatedGeneralCondition}
           )
           SELECT * FROM direct_costs
           UNION ALL
@@ -309,6 +340,21 @@ export function buildReportQuery(reportType, rawFilters = {}) {
       ? `co.idfinca = $${params.indexOf(filters.fincaId) + 1}`
       : 'TRUE';
     const stageUnfiltered = filters.etapaId ? 'FALSE' : 'TRUE';
+    const allocatedCostsByCrop = hasGeneralCostProration
+      ? `UNION ALL
+        SELECT p.idcultivo, NULL::integer AS idetapa_cultivo,
+               round(co.valor * p.porcentaje / 100, 2) AS valor,
+               ${includeInUnitCostExpression} AS incluir_costo_unitario
+        FROM costo co
+        JOIN prorrateo_costos_generales p ON p.idfinca = co.idfinca
+        JOIN filtered_crops fc ON fc.idcultivo = p.idcultivo
+        LEFT JOIN subcategoria_costo sc ON sc.idsubcategoria = co.idsubcategoria
+        LEFT JOIN categoria_costo cat ON cat.idcategoria = sc.idcategoria
+        WHERE ${costConditions}
+          AND co.idcultivo IS NULL
+          AND ${fincaCondition}
+          AND ${stageUnfiltered}`
+      : '';
     ctes.push(`costs_by_crop AS (
       SELECT all_costs.idcultivo, all_costs.idetapa_cultivo,
              SUM(all_costs.valor) AS total_costos,
@@ -322,58 +368,53 @@ export function buildReportQuery(reportType, rawFilters = {}) {
         LEFT JOIN subcategoria_costo sc ON sc.idsubcategoria = co.idsubcategoria
         LEFT JOIN categoria_costo cat ON cat.idcategoria = sc.idcategoria
         WHERE ${costConditions}
-        UNION ALL
-        SELECT p.idcultivo, NULL::integer AS idetapa_cultivo,
-               round(co.valor * p.porcentaje / 100, 2) AS valor,
-               ${includeInUnitCostExpression} AS incluir_costo_unitario
-        FROM costo co
-        JOIN prorrateo_costos_generales p ON p.idfinca = co.idfinca
-        JOIN filtered_crops fc ON fc.idcultivo = p.idcultivo
-        LEFT JOIN subcategoria_costo sc ON sc.idsubcategoria = co.idsubcategoria
-        LEFT JOIN categoria_costo cat ON cat.idcategoria = sc.idcategoria
-        WHERE ${costConditions}
-          AND co.idcultivo IS NULL
-          AND ${fincaCondition}
-          AND ${stageUnfiltered}
+        ${allocatedCostsByCrop}
       ) all_costs
       GROUP BY all_costs.idcultivo, all_costs.idetapa_cultivo
     )`);
   }
 
   if (['por-cultivo', 'produccion', 'rentabilidad'].includes(reportType)) {
-    const harvestConditions = buildHarvestConditions(filters, params);
+    const harvestConditions = buildHarvestConditions(filters, params, hasHarvestStage);
+    const harvestStageColumn = hasHarvestStage ? 'cc.idetapa_cultivo' : 'NULL::integer';
     if (reportType === 'produccion') {
+      const conversionFields = hasUnitConversions
+        ? `CASE
+             WHEN conv.factor_a_unidad_base IS NOT NULL
+             THEN cc.cantidad_cosechada * conv.factor_a_unidad_base
+             ELSE NULL
+           END AS cantidad_unidad_base,
+           base_unit.nombre AS unidad_base,`
+        : 'NULL::numeric AS cantidad_unidad_base, NULL::text AS unidad_base,';
+      const conversionJoins = hasUnitConversions
+        ? `LEFT JOIN conversion_unidades_cultivo conv
+             ON conv.idtipocultivo = fc.idtipocultivo
+            AND conv.idunidadmedida = cc.idunidadmedida
+           LEFT JOIN conversion_unidades_cultivo base_conv
+             ON base_conv.idtipocultivo = fc.idtipocultivo
+            AND base_conv.es_unidad_base = TRUE
+           LEFT JOIN unidades_medidas base_unit
+             ON base_unit.idunidadmedida = base_conv.idunidadmedida`
+        : '';
       return {
         query: `WITH ${filteredCrops}
           SELECT fc.nombre AS cultivo,
                  fc.tipo_cultivo,
                  fc.idcultivo AS id_cultivo,
                  cc.cantidad_cosechada AS cantidad,
-                 CASE
-                   WHEN conv.factor_a_unidad_base IS NOT NULL
-                   THEN cc.cantidad_cosechada * conv.factor_a_unidad_base
-                   ELSE NULL
-                 END AS cantidad_unidad_base,
-                 base_unit.nombre AS unidad_base,
+                 ${conversionFields}
                  cc.fecha_cosecha AS fecha,
                  cc.precio_unitario AS precio_unitario,
                  cc.cantidad_cosechada * cc.precio_unitario AS ingreso,
                  um.nombre AS unidad,
                  et.nombre_etapa AS etapa,
-                 cc.idetapa_cultivo AS "etapaId",
-                 cc.idetapa_cultivo AS id_etapa_cultivo
+                 ${harvestStageColumn} AS "etapaId",
+                 ${harvestStageColumn} AS id_etapa_cultivo
           FROM cosecha cc
           JOIN filtered_crops fc ON fc.idcultivo = cc.idcultivo
           LEFT JOIN unidades_medidas um ON um.idunidadmedida = cc.idunidadmedida
-          LEFT JOIN conversion_unidades_cultivo conv
-            ON conv.idtipocultivo = fc.idtipocultivo
-           AND conv.idunidadmedida = cc.idunidadmedida
-          LEFT JOIN conversion_unidades_cultivo base_conv
-            ON base_conv.idtipocultivo = fc.idtipocultivo
-           AND base_conv.es_unidad_base = TRUE
-          LEFT JOIN unidades_medidas base_unit
-            ON base_unit.idunidadmedida = base_conv.idunidadmedida
-          LEFT JOIN etapa_cultivo ec ON ec.idetapacultivo = cc.idetapa_cultivo
+          ${conversionJoins}
+          LEFT JOIN etapa_cultivo ec ON ec.idetapacultivo = ${harvestStageColumn}
           LEFT JOIN etapas et ON et.idetapa = ec.idetapa
           WHERE ${harvestConditions}
           ORDER BY cc.fecha_cosecha DESC`,
@@ -381,8 +422,9 @@ export function buildReportQuery(reportType, rawFilters = {}) {
       };
     }
 
-    ctes.push(`harvests_by_crop AS (
-      SELECT cc.idcultivo, cc.idetapa_cultivo,
+    const harvestsByCropCte = hasUnitConversions
+      ? `harvests_by_crop AS (
+      SELECT cc.idcultivo, ${harvestStageColumn} AS idetapa_cultivo,
              SUM(cc.cantidad_cosechada * cc.precio_unitario) AS total_ingresos,
              CASE
                WHEN bool_and(conv.factor_a_unidad_base IS NOT NULL)
@@ -401,8 +443,27 @@ export function buildReportQuery(reportType, rawFilters = {}) {
       LEFT JOIN unidades_medidas base_unit
         ON base_unit.idunidadmedida = base_conv.idunidadmedida
       WHERE ${harvestConditions}
-      GROUP BY cc.idcultivo, cc.idetapa_cultivo, base_unit.nombre
-    )`);
+      GROUP BY cc.idcultivo, ${harvestStageColumn}, base_unit.nombre
+    )`
+      : `harvests_by_crop AS (
+      SELECT cc.idcultivo, ${harvestStageColumn} AS idetapa_cultivo,
+             SUM(cc.cantidad_cosechada * cc.precio_unitario) AS total_ingresos,
+             CASE
+               WHEN COUNT(DISTINCT cc.idunidadmedida) = 1
+               THEN SUM(cc.cantidad_cosechada)
+               ELSE NULL
+             END AS total_produccion,
+             CASE
+               WHEN COUNT(DISTINCT cc.idunidadmedida) = 1 THEN MAX(um.nombre)
+               ELSE NULL
+             END AS unidad_base
+      FROM cosecha cc
+      JOIN filtered_crops fc ON fc.idcultivo = cc.idcultivo
+      LEFT JOIN unidades_medidas um ON um.idunidadmedida = cc.idunidadmedida
+      WHERE ${harvestConditions}
+      GROUP BY cc.idcultivo, ${harvestStageColumn}
+    )`;
+    ctes.push(harvestsByCropCte);
   }
 
   if (reportType === 'por-cultivo' || reportType === 'rentabilidad') {
@@ -530,10 +591,30 @@ export function buildReportQuery(reportType, rawFilters = {}) {
   throw new Error(`Tipo de reporte desconocido: ${reportType}`);
 }
 
+async function getSchemaCapabilities(client) {
+  const result = await client.query(`
+    SELECT to_regclass('public.conversion_unidades_cultivo') IS NOT NULL
+             AS "hasUnitConversions",
+           to_regclass('public.prorrateo_costos_generales') IS NOT NULL
+             AS "hasGeneralCostProration",
+           EXISTS (
+             SELECT 1
+             FROM information_schema.columns
+             WHERE table_schema = 'public'
+               AND table_name = 'cosecha'
+               AND column_name = 'idetapa_cultivo'
+           ) AS "hasHarvestStage"
+  `);
+  return result.rows[0];
+}
+
 async function runReport(reportType, filters) {
-  const { query, params } = buildReportQuery(reportType, filters);
   const client = await pool.connect();
+  let query;
+  let params;
   try {
+    const schemaCapabilities = await getSchemaCapabilities(client);
+    ({ query, params } = buildReportQuery(reportType, filters, schemaCapabilities));
     const result = await client.query(query, params);
     return result.rows;
   } catch (error) {
