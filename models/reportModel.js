@@ -3,6 +3,14 @@ import pool from '../config/db.js';
 // Model: consultas para la sección de reportes.
 // Todas las funciones reciben filtros y devuelven filas desde PostgreSQL.
 
+const includeInUnitCostExpression = `COALESCE(
+  (to_jsonb(sc) ->> 'incluir_costo_unitario')::boolean,
+  NOT (
+    lower(btrim(COALESCE(cat.nombre, ''))) = 'costos indirectos'
+    AND lower(btrim(COALESCE(sc.nombre, ''))) = 'impuesto de renta'
+  )
+)`;
+
 export async function getFilters(fincaId) {
   try {
     const filterFinca = Number.isInteger(Number(fincaId)) && Number(fincaId) > 0 ? Number(fincaId) : null;
@@ -29,16 +37,18 @@ export async function getFilters(fincaId) {
       ORDER BY nombre
     `;
     const categoriasQuery = `
-      SELECT idcategoria AS id, nombre, codigo_contable AS "codigoContable"
-      FROM categoria_costo
-      ORDER BY nombre
+      SELECT idcategoria AS id, nombre,
+             to_jsonb(cat) ->> 'codigo_contable' AS "codigoContable"
+      FROM categoria_costo AS cat
+      ORDER BY cat.nombre
     `;
     const subcategoriasQuery = `
-      SELECT idsubcategoria AS id, nombre, idcategoria AS "categoriaId",
-             codigo_contable AS "codigoContable",
-             incluir_costo_unitario AS "incluirCostoUnitario"
-      FROM subcategoria_costo
-      ORDER BY nombre
+      SELECT sc.idsubcategoria AS id, sc.nombre, sc.idcategoria AS "categoriaId",
+             to_jsonb(sc) ->> 'codigo_contable' AS "codigoContable",
+             ${includeInUnitCostExpression} AS "incluirCostoUnitario"
+      FROM subcategoria_costo sc
+      LEFT JOIN categoria_costo cat ON cat.idcategoria = sc.idcategoria
+      ORDER BY sc.nombre
     `;
     const tiposCultivoQuery = `
       SELECT idtipocultivo AS id, nombre
@@ -223,9 +233,10 @@ export function buildReportQuery(reportType, rawFilters = {}) {
           general_costs AS (
             SELECT co.idcosto, co.idfinca, co.id_usuario, co.idsubcategoria,
                    co.descripcion, co.valor, co.fecha,
-                   cat.nombre AS categoria, cat.codigo_contable AS codigo_categoria,
-                   sc.nombre AS subcategoria, sc.codigo_contable AS codigo_subcategoria,
-                   sc.incluir_costo_unitario
+                   cat.nombre AS categoria,
+                   to_jsonb(cat) ->> 'codigo_contable' AS codigo_categoria,
+                   sc.nombre AS subcategoria,
+                   to_jsonb(sc) ->> 'codigo_contable' AS codigo_subcategoria
             FROM costo co
             LEFT JOIN subcategoria_costo sc ON sc.idsubcategoria = co.idsubcategoria
             LEFT JOIN categoria_costo cat ON cat.idcategoria = sc.idcategoria
@@ -236,7 +247,10 @@ export function buildReportQuery(reportType, rawFilters = {}) {
           direct_costs AS (
             SELECT co.idcosto AS id_costo, fc.idcultivo AS id_cultivo,
                    co.idetapa_cultivo AS id_etapa_cultivo,
-                   COALESCE(sc.codigo_contable, cat.codigo_contable) AS codigo_contable,
+                   COALESCE(
+                     to_jsonb(sc) ->> 'codigo_contable',
+                     to_jsonb(cat) ->> 'codigo_contable'
+                   ) AS codigo_contable,
                    cat.nombre AS categoria, sc.nombre AS subcategoria,
                    fc.nombre AS cultivo, fc.tipo_cultivo, fc.unidad_base,
                    et.nombre_etapa AS etapa, co.idetapa_cultivo AS "etapaId",
@@ -301,20 +315,22 @@ export function buildReportQuery(reportType, rawFilters = {}) {
              SUM(CASE WHEN all_costs.incluir_costo_unitario
                       THEN all_costs.valor ELSE 0 END) AS costo_produccion
       FROM (
-        SELECT co.idcultivo, co.idetapa_cultivo, co.valor
-             , sc.incluir_costo_unitario
+        SELECT co.idcultivo, co.idetapa_cultivo, co.valor,
+               ${includeInUnitCostExpression} AS incluir_costo_unitario
         FROM costo co
         JOIN filtered_crops fc ON fc.idcultivo = co.idcultivo
         LEFT JOIN subcategoria_costo sc ON sc.idsubcategoria = co.idsubcategoria
+        LEFT JOIN categoria_costo cat ON cat.idcategoria = sc.idcategoria
         WHERE ${costConditions}
         UNION ALL
         SELECT p.idcultivo, NULL::integer AS idetapa_cultivo,
                round(co.valor * p.porcentaje / 100, 2) AS valor,
-               sc.incluir_costo_unitario
+               ${includeInUnitCostExpression} AS incluir_costo_unitario
         FROM costo co
         JOIN prorrateo_costos_generales p ON p.idfinca = co.idfinca
         JOIN filtered_crops fc ON fc.idcultivo = p.idcultivo
         LEFT JOIN subcategoria_costo sc ON sc.idsubcategoria = co.idsubcategoria
+        LEFT JOIN categoria_costo cat ON cat.idcategoria = sc.idcategoria
         WHERE ${costConditions}
           AND co.idcultivo IS NULL
           AND ${fincaCondition}

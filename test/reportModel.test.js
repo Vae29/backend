@@ -124,7 +124,17 @@ test('crop cost unit uses all crop costs and only comparable base-unit productio
   assert.match(query, /crop_production_totals AS \(/);
   assert.match(query, /bool_and\(total_produccion IS NOT NULL\)/);
   assert.match(query, /COALESCE\(cost_totals\.costo_produccion, 0\) \/ production_totals\.total_produccion/);
-  assert.match(query, /sc\.incluir_costo_unitario/);
+  assert.match(query, /to_jsonb\(sc\) ->> 'incluir_costo_unitario'/);
+  assert.match(query, /costos indirectos/);
+  assert.doesNotMatch(query, /sc\.incluir_costo_unitario/);
+});
+
+test('cost report tolerates optional accounting columns missing from the database schema', () => {
+  const { query } = buildReportQuery('costos');
+
+  assert.match(query, /to_jsonb\(sc\) ->> 'codigo_contable'/);
+  assert.match(query, /to_jsonb\(cat\) ->> 'codigo_contable'/);
+  assert.doesNotMatch(query, /sc\.codigo_contable|cat\.codigo_contable|sc\.incluir_costo_unitario/);
 });
 
 test('costs report model totals use exact cents and keep unallocated costs separate', () => {
