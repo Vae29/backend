@@ -21,6 +21,13 @@ router.post('/costos', postReportCostos);
 router.post('/produccion', postReportProduccion);
 router.post('/rentabilidad', postReportRentabilidad);
 router.post('/trabajador', postReportTrabajador);
+router.get('/export', (req, res) => {
+  res.setHeader('Allow', 'POST');
+  return res.status(405).json({
+    success: false,
+    message: 'La exportación requiere POST con tipo, formato y filtros.',
+  });
+});
 router.post('/export', verificarAccessToken, verificarAdmin, auditContext('REPORTES'), postReportExport);
 
 export default router;

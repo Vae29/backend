@@ -60,6 +60,7 @@ app.use('/api/fincas', fincasRoutes);
 app.use('/api', asignacionesUsuarioRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/reportes', reportesRoutes);
+app.use('/reportes', reportesRoutes);
 app.use('/api/costeo', costeoRoutes);
 
 /* =========================
