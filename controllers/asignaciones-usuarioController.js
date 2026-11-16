@@ -1,5 +1,5 @@
-﻿import { fetchAllFincas, fetchCultivosEnProceso, fetchCultivosPorFinca, fetchCultivoDetalleById, fetchCostosPorFinca, fetchCategoriasCosto, fetchSubcategoriasPorCategoria, fetchEstadosPago, fetchEtapaEnProcesoPorCultivo, validateCultivoCanAddCosto, validateActiveEtapaForCultivo, createCosto, updateCosto, deleteCostoById, fetchTiposCultivo, fetchEstados, fetchEstadoById, createCultivo, updateCultivo, fetchCultivosPorUsuario, fetchFincasPorUsuario, deleteOrDeactivateEtapaById, deleteCultivoById, changeCultivoState, changeCostoState, changeEtapaState, changeCosechaState, fetchEtapasPorCultivo, fetchAllEtapasCatalog, finalizeEtapaEnProceso, createEtapaParaCultivo, updateEtapaParaCultivo, fetchCosechasPorCultivo, fetchUnidadesMedida, fetchTiposPrecio, validateCultivoCanAddCosecha, createCosecha, updateCosecha, deleteCosechaById } from '../models/asinaciones-usuarioModel.js';
-import { parseCurrencyValue } from '../utils/currency.js'
+import { fetchAllFincas, fetchCultivosEnProceso, fetchCultivosPorFinca, fetchCultivoDetalleById, fetchCostosPorFinca, fetchCategoriasCosto, fetchSubcategoriasPorCategoria, fetchEstadosPago, fetchEtapaEnProcesoPorCultivo, validateCultivoCanAddCosto, validateActiveEtapaForCultivo, createCosto, updateCosto, deleteCostoById, fetchTiposCultivo, fetchEstados, fetchEstadoById, createCultivo, updateCultivo, fetchCultivosPorUsuario, fetchFincasPorUsuario, deleteOrDeactivateEtapaById, deleteCultivoById, changeCultivoState, changeCostoState, changeEtapaState, changeCosechaState, fetchEtapasPorCultivo, fetchAllEtapasCatalog, validateEtapaAllowedForCultivo, validateEtapaAllowedForEtapaCultivo, finalizeEtapaEnProceso, createEtapaParaCultivo, updateEtapaParaCultivo, fetchCosechasPorCultivo, fetchUnidadesMedida, fetchTiposPrecio, validateCultivoCanAddCosecha, createCosecha, updateCosecha, deleteCosechaById } from '../models/asinaciones-usuarioModel.js';
+import { parseCurrencyValue, parseQuantityValue } from '../utils/currency.js'
 
 export async function getFincas(req, res) {
   try {
@@ -318,7 +318,7 @@ export async function getTiposPrecio(req, res) {
 export async function postCosecha(req, res) {
   try {
     const cultivoId = Number(req.params.cultivoId)
-    const cantidad = parseCurrencyValue(req.body.cantidad)
+    const cantidad = parseQuantityValue(req.body.cantidad)
     const idunidadmedida = Number(req.body.idunidadmedida)
     const precio = parseCurrencyValue(req.body.precio)
     const idtipo_precio = Number(req.body.idtipo_precio)
@@ -348,6 +348,7 @@ export async function postCosecha(req, res) {
 
     const cosecha = await createCosecha({
       idcultivo: cultivoId,
+      idetapa_cultivo: etapaActiva.idetapacultivo,
       cantidad_cosechada: cantidad,
       idunidadmedida,
       precio_unitario: precio,
@@ -364,7 +365,7 @@ export async function postCosecha(req, res) {
 export async function putCosecha(req, res) {
   try {
     const id = Number(req.params.id)
-    const cantidad = parseCurrencyValue(req.body.cantidad)
+    const cantidad = parseQuantityValue(req.body.cantidad)
     const idunidadmedida = Number(req.body.idunidadmedida)
     const precio = parseCurrencyValue(req.body.precio)
     const idtipo_precio = Number(req.body.idtipo_precio)
@@ -447,7 +448,11 @@ export async function getCultivosPorUsuario(req, res) {
 
 export async function getEtapasCatalog(req, res) {
   try {
-    const data = await fetchAllEtapasCatalog()
+    const tipoCultivoId = req.query.tipoCultivoId == null ? null : Number(req.query.tipoCultivoId)
+    if (tipoCultivoId !== null && (!Number.isInteger(tipoCultivoId) || tipoCultivoId <= 0)) {
+      return res.status(400).json({ success: false, message: 'ID de tipo de cultivo inválido' })
+    }
+    const data = await fetchAllEtapasCatalog(tipoCultivoId)
     res.json({ success: true, data })
   } catch (error) {
     console.error('Error en getEtapasCatalog:', error)
@@ -464,6 +469,13 @@ export async function postEtapaPorCultivo(req, res) {
     const { idetapa, descripcion, forceFinalize } = req.body
     if (!idetapa) {
       return res.status(400).json({ success: false, message: 'ID de etapa requerido' })
+    }
+    const etapaPermitida = await validateEtapaAllowedForCultivo(cultivoId, Number(idetapa))
+    if (!etapaPermitida) {
+      return res.status(400).json({
+        success: false,
+        message: 'La etapa no está habilitada para el tipo de cultivo seleccionado.',
+      })
     }
 
     let finalized = []
@@ -488,6 +500,15 @@ export async function putEtapaPorCultivo(req, res) {
     }
 
     const { idetapa, descripcion, idestado, forceFinalize, forceEnProceso } = req.body
+    if (idetapa !== undefined) {
+      const etapaPermitida = await validateEtapaAllowedForEtapaCultivo(etapaId, Number(idetapa))
+      if (!etapaPermitida) {
+        return res.status(400).json({
+          success: false,
+          message: 'La etapa no está habilitada para el tipo de cultivo seleccionado.',
+        })
+      }
+    }
     const updated = await updateEtapaParaCultivo(
       etapaId,
       {
@@ -634,6 +655,9 @@ export async function postCosto(req, res) {
     })
   } catch (error) {
     console.error('Error en postCosto:', error)
+    if (error?.statusCode) {
+      return res.status(error.statusCode).json({ success: false, message: error.message })
+    }
     if (error?.code === '23503') {
       return res.status(400).json({
         success: false,
@@ -687,6 +711,9 @@ export async function putCosto(req, res) {
     res.json({ success: true, data: updatedCosto })
   } catch (error) {
     console.error('Error en putCosto:', error)
+    if (error?.statusCode) {
+      return res.status(error.statusCode).json({ success: false, message: error.message })
+    }
     if (error?.code === '23503') {
       return res.status(400).json({
         success: false,
@@ -716,6 +743,9 @@ export async function deleteCosto(req, res) {
     res.json({ success: true, data: deleted })
   } catch (error) {
     console.error('Error en deleteCosto:', error)
+    if (error?.statusCode) {
+      return res.status(error.statusCode).json({ success: false, message: error.message })
+    }
     res.status(500).json({ success: false, message: 'Error al eliminar el costo' })
   }
 }
@@ -840,6 +870,9 @@ export async function changeCostoStateController(req, res) {
     res.json({ success: true, message: 'Estado del costo actualizado exitosamente', data: updated });
   } catch (error) {
     console.error('Error en changeCostoStateController:', error);
+    if (error?.statusCode) {
+      return res.status(error.statusCode).json({ success: false, message: error.message });
+    }
     res.status(500).json({ success: false, message: 'Error al cambiar el estado del costo' });
   }
 }

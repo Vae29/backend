@@ -1,6 +1,48 @@
 import pool, { getRequestDatabaseClient } from '../config/db.js';
 import { toDatabaseRegistroState } from '../utils/registroEstado.js';
 
+async function assertManualMateriaPrimaNotUsed(subcategoryId, costId = null) {
+  const migration = await pool.query(
+    `SELECT EXISTS (
+       SELECT 1
+       FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND table_name = 'categoria_costo'
+         AND column_name = 'codigo_contable'
+     ) AS applied`
+  );
+  if (!migration.rows[0].applied) return;
+
+  const result = await pool.query(
+    `SELECT EXISTS (
+       SELECT 1
+       FROM subcategoria_costo sc
+       JOIN categoria_costo cc ON cc.idcategoria = sc.idcategoria
+       WHERE sc.idsubcategoria = $1
+         AND cc.codigo_contable = '7105'
+     ) OR EXISTS (
+       SELECT 1
+       FROM costo co
+       LEFT JOIN subcategoria_costo sc ON sc.idsubcategoria = co.idsubcategoria
+       LEFT JOIN categoria_costo cc ON cc.idcategoria = sc.idcategoria
+       WHERE co.idcosto = $2
+         AND (
+           cc.codigo_contable = '7105'
+           OR EXISTS (
+             SELECT 1 FROM costo_insumo ci WHERE ci.idcosto = co.idcosto
+           )
+         )
+     ) AS administrado_por_inventario`,
+    [subcategoryId, costId]
+  );
+  if (result.rows[0].administrado_por_inventario) {
+    throw Object.assign(
+      new Error('Materia Prima se registra desde la salida de inventario. No se puede crear, modificar, eliminar ni anular este costo manualmente.'),
+      { statusCode: costId ? 409 : 400 }
+    );
+  }
+}
+
 export async function fetchAllFincas() {
   try {
     const result = await pool.query(
@@ -243,16 +285,71 @@ export async function fetchEtapasPorCultivo(idcultivo) {
   }
 }
 
-export async function fetchAllEtapasCatalog() {
+export async function fetchAllEtapasCatalog(tipoCultivoId = null) {
   try {
     const result = await pool.query(
-      'SELECT idetapa AS id, nombre_etapa AS nombre FROM etapas ORDER BY nombre_etapa'
+      `SELECT et.idetapa AS id, et.nombre_etapa AS nombre
+       FROM etapas et
+       WHERE et.estado_registro = 1
+         AND ($1::int IS NULL
+          OR NOT EXISTS (
+            SELECT 1 FROM etapas_tipo_cultivo etc
+            WHERE etc.idtipocultivo = $1 AND etc.estado_registro = 1
+          )
+          OR EXISTS (
+            SELECT 1 FROM etapas_tipo_cultivo etc
+            WHERE etc.idtipocultivo = $1
+              AND etc.idetapa = et.idetapa
+              AND etc.estado_registro = 1
+          ))
+       ORDER BY et.nombre_etapa`,
+      [tipoCultivoId]
     )
     return result.rows
   } catch (error) {
     console.error('Error fetching etapas catalog:', error)
     throw error
   }
+}
+
+export async function validateEtapaAllowedForCultivo(idcultivo, idetapa) {
+  const result = await pool.query(
+    `SELECT
+       EXISTS (
+         SELECT 1 FROM etapas_tipo_cultivo etc
+         WHERE etc.idtipocultivo = c.idtipocultivo
+           AND etc.estado_registro = 1
+       ) AS has_configured_stages,
+       EXISTS (
+         SELECT 1 FROM etapas_tipo_cultivo etc
+         WHERE etc.idtipocultivo = c.idtipocultivo
+           AND etc.idetapa = $2
+           AND etc.estado_registro = 1
+       ) AS stage_is_configured,
+       EXISTS (
+         SELECT 1 FROM etapas et
+         WHERE et.idetapa = $2 AND et.estado_registro = 1
+       ) AS stage_is_active
+     FROM cultivo c
+     WHERE c.idcultivo = $1 AND c.estado_registro = 1`,
+    [idcultivo, idetapa]
+  );
+  const crop = result.rows[0];
+  return Boolean(
+    crop?.stage_is_active &&
+    (!crop.has_configured_stages || crop.stage_is_configured)
+  );
+}
+
+export async function validateEtapaAllowedForEtapaCultivo(etapaCultivoId, idetapa) {
+  const result = await pool.query(
+    `SELECT ec.idcultivo
+     FROM etapa_cultivo ec
+     WHERE ec.idetapacultivo = $1`,
+    [etapaCultivoId]
+  );
+  if (!result.rows[0]) return false;
+  return validateEtapaAllowedForCultivo(result.rows[0].idcultivo, idetapa);
 }
 
 export async function finalizeEtapaEnProceso(idcultivo) {
@@ -424,7 +521,7 @@ export async function deleteOrDeactivateEtapaById(idetapaCultivo) {
 export async function fetchTiposCultivo() {
   try {
     const result = await pool.query(
-      'SELECT idtipocultivo AS id, nombre FROM tipos_cultivo ORDER BY nombre'
+      'SELECT idtipocultivo AS id, nombre FROM tipos_cultivo WHERE estado_registro = 1 ORDER BY nombre'
     );
     return result.rows;
   } catch (error) {
@@ -665,6 +762,8 @@ export async function fetchCosechasPorCultivo(idcultivo) {
       `SELECT
          c.idcosecha AS id,
          c.idcultivo,
+         c.idetapa_cultivo AS "etapaId",
+         et.nombre_etapa AS etapa,
          c.fecha_cosecha AS fecha,
          c.cantidad_cosechada AS cantidad,
          c.precio_unitario AS precio,
@@ -676,6 +775,8 @@ export async function fetchCosechasPorCultivo(idcultivo) {
        FROM cosecha c
        LEFT JOIN unidades_medidas um ON c.idunidadmedida = um.idunidadmedida
        LEFT JOIN tipo_precio tp ON c.idtipoprecio = tp.idtipoprecio
+       LEFT JOIN etapa_cultivo ec ON ec.idetapacultivo = c.idetapa_cultivo
+       LEFT JOIN etapas et ON et.idetapa = ec.idetapa
        WHERE c.idcultivo = $1
        ORDER BY c.fecha_cosecha DESC`,
       [idcultivo]
@@ -711,13 +812,16 @@ export async function fetchTiposPrecio() {
   }
 }
 
-export async function createCosecha({ idcultivo, cantidad_cosechada, idunidadmedida, precio_unitario, idtipo_precio }) {
+export async function createCosecha({ idcultivo, idetapa_cultivo, cantidad_cosechada, idunidadmedida, precio_unitario, idtipo_precio }) {
   try {
     const result = await pool.query(
-      `INSERT INTO cosecha (idcultivo, cantidad_cosechada, idunidadmedida, precio_unitario, idtipoprecio, fecha_cosecha)
-       VALUES ($1, $2, $3, $4, $5, CURRENT_DATE)
-       RETURNING idcosecha AS id, idcultivo, cantidad_cosechada AS cantidad, idunidadmedida, precio_unitario AS precio, idtipoprecio AS tipoPrecioId, fecha_cosecha AS fecha`,
-      [idcultivo, cantidad_cosechada, idunidadmedida, precio_unitario, idtipo_precio]
+      `INSERT INTO cosecha (idcultivo, idetapa_cultivo, cantidad_cosechada, idunidadmedida, precio_unitario, idtipoprecio, fecha_cosecha)
+       VALUES ($1, $2, $3, $4, $5, $6, CURRENT_DATE)
+       RETURNING idcosecha AS id, idcultivo, idetapa_cultivo AS "etapaId",
+                 cantidad_cosechada AS cantidad, idunidadmedida,
+                 precio_unitario AS precio, idtipoprecio AS "tipoPrecioId",
+                 fecha_cosecha AS fecha`,
+      [idcultivo, idetapa_cultivo, cantidad_cosechada, idunidadmedida, precio_unitario, idtipo_precio]
     );
     return result.rows[0];
   } catch (error) {
@@ -762,11 +866,27 @@ export async function validateActiveEtapaForCultivo(idetapacultivo, idcultivo) {
   try {
     const result = await pool.query(
       `SELECT 1
-       FROM etapa_cultivo
-       WHERE idetapacultivo = $1
-         AND idcultivo = $2
-         AND idestadocultivo = 1
-         AND estado_registro = 1
+       FROM etapa_cultivo ec
+       JOIN cultivo c ON c.idcultivo = ec.idcultivo
+       JOIN etapas et ON et.idetapa = ec.idetapa AND et.estado_registro = 1
+       WHERE ec.idetapacultivo = $1
+         AND ec.idcultivo = $2
+         AND ec.idestadocultivo = 1
+         AND ec.estado_registro = 1
+         AND c.estado_registro = 1
+         AND (
+           NOT EXISTS (
+             SELECT 1 FROM etapas_tipo_cultivo configured
+             WHERE configured.idtipocultivo = c.idtipocultivo
+               AND configured.estado_registro = 1
+           )
+           OR EXISTS (
+             SELECT 1 FROM etapas_tipo_cultivo configured
+             WHERE configured.idtipocultivo = c.idtipocultivo
+               AND configured.idetapa = ec.idetapa
+               AND configured.estado_registro = 1
+           )
+         )
        LIMIT 1`,
       [idetapacultivo, idcultivo]
     );
@@ -779,6 +899,7 @@ export async function validateActiveEtapaForCultivo(idetapacultivo, idcultivo) {
 
 export async function createCosto({ descripcion, valor, idcultivo, idetapa_cultivo, idusuario, idsubcategoria, idfinca, idestado_pago }) {
   try {
+    await assertManualMateriaPrimaNotUsed(idsubcategoria);
     const result = await pool.query(
       `INSERT INTO costo (descripcion, valor, fecha, idcultivo, idetapa_cultivo, id_usuario, idsubcategoria, idfinca, idestado_pago)
        VALUES ($1, $2, CURRENT_DATE, $3, $4, $5, $6, $7, $8)
@@ -794,6 +915,7 @@ export async function createCosto({ descripcion, valor, idcultivo, idetapa_culti
 
 export async function updateCosto(idcosto, { descripcion, valor, idsubcategoria, idestado_pago }) {
   try {
+    await assertManualMateriaPrimaNotUsed(idsubcategoria, idcosto);
     const result = await pool.query(
       `UPDATE costo
        SET descripcion = $1,
@@ -813,6 +935,7 @@ export async function updateCosto(idcosto, { descripcion, valor, idsubcategoria,
 
 export async function deleteCostoById(idcosto) {
   try {
+    await assertManualMateriaPrimaNotUsed(null, idcosto);
     const result = await pool.query(
       'DELETE FROM costo WHERE idcosto = $1 RETURNING idcosto AS id',
       [idcosto]
@@ -845,6 +968,7 @@ export async function changeCultivoState(idcultivo, nuevoEstado) {
 }
 
 export async function changeCostoState(idcosto, nuevoEstado) {
+  await assertManualMateriaPrimaNotUsed(null, idcosto);
   const result = await pool.query(
     `UPDATE costo
      SET estado_registro = $1

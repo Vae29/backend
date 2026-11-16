@@ -82,3 +82,36 @@ test('report queries return every matching detail and summary row without an arb
     assert.doesNotMatch(query, /LIMIT\s+1000/i, `${reportType} should not truncate report rows`);
   }
 });
+
+test('type-of-crop and stage filters constrain reports without interpolating input', () => {
+  const { query, params } = buildReportQuery('rentabilidad', {
+    fincaId: 7,
+    tipoCultivoId: 3,
+    etapaId: 9,
+  });
+
+  assert.deepEqual(params, [7, 3, 9, 9]);
+  assert.match(query, /cu\.idtipocultivo = \$2/);
+  assert.match(query, /ec\.idetapa = \$3/);
+  assert.match(query, /ec\.idetapa = \$4/);
+});
+
+test('cost reports include allocated and unallocated general costs', () => {
+  const { query, params } = buildReportQuery('costos', { fincaId: 7 });
+
+  assert.deepEqual(params, [7]);
+  assert.match(query, /general_costs AS \(/);
+  assert.match(query, /allocated_general AS \(/);
+  assert.match(query, /unallocated_general AS \(/);
+  assert.match(query, /round\(gc\.valor \* p\.porcentaje \/ 100, 2\)/);
+});
+
+test('crop cost unit uses all crop costs and only comparable base-unit production', () => {
+  const { query } = buildReportQuery('rentabilidad');
+
+  assert.match(query, /crop_cost_totals AS \(/);
+  assert.match(query, /crop_production_totals AS \(/);
+  assert.match(query, /bool_and\(total_produccion IS NOT NULL\)/);
+  assert.match(query, /COALESCE\(cost_totals\.costo_produccion, 0\) \/ production_totals\.total_produccion/);
+  assert.match(query, /sc\.incluir_costo_unitario/);
+});

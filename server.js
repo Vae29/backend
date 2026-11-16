@@ -9,6 +9,7 @@ import authRoutes from './routes/auth.js';
 import asignacionesUsuarioRoutes from './routes/asignaciones-usuario.js';
 import dashboardRoutes from './routes/dashboard.js';
 import reportesRoutes from './routes/reportes.js';
+import costeoRoutes from './routes/costeo.js';
 import fincasRoutes from './routes/fincas.js';
 
 const app = express();
@@ -27,6 +28,7 @@ app.use(cors({
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
+  exposedHeaders: ['Content-Disposition', 'X-Export-Rows'],
 }));
 
 /* =========================
@@ -58,6 +60,7 @@ app.use('/api/fincas', fincasRoutes);
 app.use('/api', asignacionesUsuarioRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/reportes', reportesRoutes);
+app.use('/api/costeo', costeoRoutes);
 
 /* =========================
    DB TEST

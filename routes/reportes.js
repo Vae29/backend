@@ -8,6 +8,9 @@ import {
   postReportRentabilidad,
   postReportTrabajador,
 } from '../controllers/reportController.js';
+import { postReportExport } from '../controllers/reportExportController.js';
+import { verificarAccessToken, verificarAdmin } from '../middleware/auth.js';
+import { auditContext } from '../middleware/auditContext.js';
 
 const router = Router();
 
@@ -18,5 +21,6 @@ router.post('/costos', postReportCostos);
 router.post('/produccion', postReportProduccion);
 router.post('/rentabilidad', postReportRentabilidad);
 router.post('/trabajador', postReportTrabajador);
+router.post('/export', verificarAccessToken, verificarAdmin, auditContext('REPORTES'), postReportExport);
 
 export default router;
