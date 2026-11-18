@@ -958,7 +958,7 @@ export async function validateActiveEtapaForCultivo(idetapacultivo, idcultivo) {
       `SELECT 1
        FROM etapa_cultivo ec
        JOIN cultivo c ON c.idcultivo = ec.idcultivo
-       JOIN etapas et ON et.idetapa = ec.idetapa AND et.estado_registro = 1
+       JOIN etapas et ON et.idetapa = ec.idetapa
        WHERE ec.idetapacultivo = $1
          AND ec.idcultivo = $2
          AND ec.idestadocultivo = 1

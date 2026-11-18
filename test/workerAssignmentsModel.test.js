@@ -6,6 +6,7 @@ import {
   fetchCosechasPorCultivo,
   fetchAllEtapasCatalog,
   FINCAS_POR_USUARIO_QUERY,
+  validateActiveEtapaForCultivo,
   validateEtapaAllowedForCultivo,
 } from '../models/asinaciones-usuarioModel.js'
 
@@ -16,6 +17,27 @@ test('worker farm query includes directly assigned farms', () => {
 test('worker farm query includes the farm of an actively assigned crop', () => {
   assert.match(FINCAS_POR_USUARIO_QUERY, /FROM cultivo c[\s\S]*INNER JOIN usuario_cultivo uc ON uc\.idcultivo = c\.idcultivo[\s\S]*c\.idfinca = f\.idfinca[\s\S]*uc\.id_usuario = \$1[\s\S]*c\.estado_registro = 1/)
   assert.match(FINCAS_POR_USUARIO_QUERY, /f\.estado_registro = 1/)
+})
+
+test('active stage validation checks state on the crop stage, not the stage catalog', async () => {
+  const originalQuery = pool.query
+  let executedQuery = ''
+  let queryParams = []
+  pool.query = async (query, params) => {
+    executedQuery = query
+    queryParams = params
+    return { rows: [{}] }
+  }
+
+  try {
+    assert.equal(await validateActiveEtapaForCultivo(7, 3), true)
+    assert.match(executedQuery, /JOIN etapas et ON et\.idetapa = ec\.idetapa/)
+    assert.match(executedQuery, /ec\.estado_registro = 1/)
+    assert.doesNotMatch(executedQuery, /et\.estado_registro/)
+    assert.deepEqual(queryParams, [7, 3])
+  } finally {
+    pool.query = originalQuery
+  }
 })
 
 test('stage catalog uses existing stages when type-stage mappings are unavailable', async () => {

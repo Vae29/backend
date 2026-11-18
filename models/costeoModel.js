@@ -343,7 +343,7 @@ export async function registerInventoryConsumption({
     `SELECT 1
      FROM cultivo c
      JOIN etapa_cultivo ec ON ec.idcultivo = c.idcultivo
-     JOIN etapas et ON et.idetapa = ec.idetapa AND et.estado_registro = 1
+     JOIN etapas et ON et.idetapa = ec.idetapa
      WHERE c.idcultivo = $1 AND c.idfinca = $2
        AND c.estado_registro = 1
        AND ec.idetapacultivo = $3
@@ -423,7 +423,7 @@ export async function registerLaborPayment({
        SELECT 1
        FROM etapa_cultivo ec
        JOIN cultivo crop ON crop.idcultivo = ec.idcultivo
-       JOIN etapas et ON et.idetapa = ec.idetapa AND et.estado_registro = 1
+       JOIN etapas et ON et.idetapa = ec.idetapa
        WHERE ec.idetapacultivo = $5 AND ec.idcultivo = $4
          AND ec.estado_registro = 1 AND ec.idestadocultivo = 1
          AND crop.idfinca = $8 AND crop.estado_registro = 1
