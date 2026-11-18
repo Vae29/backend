@@ -1,5 +1,12 @@
 import pool from '../config/db.js';
 
+async function hasTypeStageMappingTable() {
+  const result = await pool.query(
+    `SELECT to_regclass('public.etapas_tipo_cultivo') IS NOT NULL AS available`
+  );
+  return Boolean(result.rows[0]?.available);
+}
+
 export async function getCostingConfiguration() {
   const [types, stages, catalogStages, units, categories] = await Promise.all([
     pool.query(
@@ -339,6 +346,22 @@ export async function registerInventoryConsumption({
     });
   }
 
+  const hasTypeStageMapping = await hasTypeStageMappingTable();
+  const typeStageCondition = hasTypeStageMapping
+    ? `AND (
+        NOT EXISTS (
+          SELECT 1 FROM etapas_tipo_cultivo configured
+          WHERE configured.idtipocultivo = c.idtipocultivo
+            AND configured.estado_registro = 1
+        )
+        OR EXISTS (
+          SELECT 1 FROM etapas_tipo_cultivo configured
+          WHERE configured.idtipocultivo = c.idtipocultivo
+            AND configured.idetapa = ec.idetapa
+            AND configured.estado_registro = 1
+        )
+      )`
+    : '';
   const validStage = await pool.query(
     `SELECT 1
      FROM cultivo c
@@ -348,19 +371,7 @@ export async function registerInventoryConsumption({
        AND c.estado_registro = 1
        AND ec.idetapacultivo = $3
        AND ec.idestadocultivo = 1 AND ec.estado_registro = 1
-       AND (
-         NOT EXISTS (
-           SELECT 1 FROM etapas_tipo_cultivo configured
-           WHERE configured.idtipocultivo = c.idtipocultivo
-             AND configured.estado_registro = 1
-         )
-         OR EXISTS (
-           SELECT 1 FROM etapas_tipo_cultivo configured
-           WHERE configured.idtipocultivo = c.idtipocultivo
-             AND configured.idetapa = ec.idetapa
-             AND configured.estado_registro = 1
-         )
-       )`,
+       ${typeStageCondition}`,
     [cultivoId, fincaId, etapaId]
   );
   if (!validStage.rowCount) {
@@ -409,6 +420,22 @@ export async function registerLaborPayment({
     });
   }
 
+  const hasTypeStageMapping = await hasTypeStageMappingTable();
+  const typeStageCondition = hasTypeStageMapping
+    ? `AND (
+        NOT EXISTS (
+          SELECT 1 FROM etapas_tipo_cultivo configured
+          WHERE configured.idtipocultivo = crop.idtipocultivo
+            AND configured.estado_registro = 1
+        )
+        OR EXISTS (
+          SELECT 1 FROM etapas_tipo_cultivo configured
+          WHERE configured.idtipocultivo = crop.idtipocultivo
+            AND configured.idetapa = ec.idetapa
+            AND configured.estado_registro = 1
+        )
+      )`
+    : '';
   const result = await pool.query(
     `INSERT INTO costo (
        descripcion, valor, fecha, idcultivo, idetapa_cultivo, id_usuario,
@@ -427,19 +454,7 @@ export async function registerLaborPayment({
        WHERE ec.idetapacultivo = $5 AND ec.idcultivo = $4
          AND ec.estado_registro = 1 AND ec.idestadocultivo = 1
          AND crop.idfinca = $8 AND crop.estado_registro = 1
-         AND (
-           NOT EXISTS (
-             SELECT 1 FROM etapas_tipo_cultivo configured
-             WHERE configured.idtipocultivo = crop.idtipocultivo
-               AND configured.estado_registro = 1
-           )
-           OR EXISTS (
-             SELECT 1 FROM etapas_tipo_cultivo configured
-             WHERE configured.idtipocultivo = crop.idtipocultivo
-               AND configured.idetapa = ec.idetapa
-               AND configured.estado_registro = 1
-           )
-         )
+         ${typeStageCondition}
      )
        AND EXISTS (
        SELECT 1 FROM usuario u

@@ -21,20 +21,44 @@ test('worker farm query includes the farm of an actively assigned crop', () => {
 
 test('active stage validation checks state on the crop stage, not the stage catalog', async () => {
   const originalQuery = pool.query
-  let executedQuery = ''
-  let queryParams = []
+  const queries = []
   pool.query = async (query, params) => {
-    executedQuery = query
-    queryParams = params
+    queries.push({ query, params })
+    if (query.includes("to_regclass('public.etapas_tipo_cultivo')")) {
+      return { rows: [{ available: false }] }
+    }
     return { rows: [{}] }
   }
 
   try {
     assert.equal(await validateActiveEtapaForCultivo(7, 3), true)
-    assert.match(executedQuery, /JOIN etapas et ON et\.idetapa = ec\.idetapa/)
-    assert.match(executedQuery, /ec\.estado_registro = 1/)
-    assert.doesNotMatch(executedQuery, /et\.estado_registro/)
-    assert.deepEqual(queryParams, [7, 3])
+    assert.equal(queries.length, 2)
+    assert.match(queries[1].query, /JOIN etapas et ON et\.idetapa = ec\.idetapa/)
+    assert.match(queries[1].query, /ec\.estado_registro = 1/)
+    assert.doesNotMatch(queries[1].query, /et\.estado_registro|etapas_tipo_cultivo/)
+    assert.deepEqual(queries[1].params, [7, 3])
+  } finally {
+    pool.query = originalQuery
+  }
+})
+
+test('active stage validation enforces configured stages when the mapping table exists', async () => {
+  const originalQuery = pool.query
+  const queries = []
+  pool.query = async (query, params) => {
+    queries.push({ query, params })
+    if (query.includes("to_regclass('public.etapas_tipo_cultivo')")) {
+      return { rows: [{ available: true }] }
+    }
+    return { rows: [{}] }
+  }
+
+  try {
+    assert.equal(await validateActiveEtapaForCultivo(7, 3), true)
+    assert.equal(queries.length, 2)
+    assert.match(queries[1].query, /FROM etapas_tipo_cultivo configured/)
+    assert.match(queries[1].query, /configured\.idetapa = ec\.idetapa/)
+    assert.deepEqual(queries[1].params, [7, 3])
   } finally {
     pool.query = originalQuery
   }

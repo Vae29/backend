@@ -954,6 +954,22 @@ export async function deleteCosechaById(idcosecha) {
 
 export async function validateActiveEtapaForCultivo(idetapacultivo, idcultivo) {
   try {
+    const hasTypeStageMapping = await hasTypeStageMappingTable()
+    const typeStageCondition = hasTypeStageMapping
+      ? `AND (
+          NOT EXISTS (
+            SELECT 1 FROM etapas_tipo_cultivo configured
+            WHERE configured.idtipocultivo = c.idtipocultivo
+              AND configured.estado_registro = 1
+          )
+          OR EXISTS (
+            SELECT 1 FROM etapas_tipo_cultivo configured
+            WHERE configured.idtipocultivo = c.idtipocultivo
+              AND configured.idetapa = ec.idetapa
+              AND configured.estado_registro = 1
+          )
+        )`
+      : ''
     const result = await pool.query(
       `SELECT 1
        FROM etapa_cultivo ec
@@ -964,19 +980,7 @@ export async function validateActiveEtapaForCultivo(idetapacultivo, idcultivo) {
          AND ec.idestadocultivo = 1
          AND ec.estado_registro = 1
          AND c.estado_registro = 1
-         AND (
-           NOT EXISTS (
-             SELECT 1 FROM etapas_tipo_cultivo configured
-             WHERE configured.idtipocultivo = c.idtipocultivo
-               AND configured.estado_registro = 1
-           )
-           OR EXISTS (
-             SELECT 1 FROM etapas_tipo_cultivo configured
-             WHERE configured.idtipocultivo = c.idtipocultivo
-               AND configured.idetapa = ec.idetapa
-               AND configured.estado_registro = 1
-           )
-         )
+         ${typeStageCondition}
        LIMIT 1`,
       [idetapacultivo, idcultivo]
     );
