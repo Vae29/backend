@@ -71,9 +71,23 @@ test('summary reports aggregate costs and harvests before joining them', () => {
 
   assert.match(query, /costs_by_crop AS \(/);
   assert.match(query, /harvests_by_crop AS \(/);
+  assert.match(query, /production_summary_harvests AS \(/);
+  assert.match(query, /'totalsByBaseUnit'/);
+  assert.match(query, /'totalsByOriginalUnit'/);
+  assert.match(query, /'excludedHarvestCount'/);
+  assert.match(query, /'pendingConversions'/);
   assert.match(query, /LEFT JOIN costs_by_crop/);
   assert.match(query, /LEFT JOIN harvests_by_crop/);
+  assert.match(query, /CROSS JOIN production_summary/);
   assert.doesNotMatch(query, /JOIN cosecha cc ON cc\.idcultivo = cu\.idcultivo[\s\S]*JOIN costo co/);
+});
+
+test('production summary metadata is limited to the crop report', () => {
+  const { query: profitabilityQuery } = buildReportQuery('rentabilidad');
+  const { query: productionQuery } = buildReportQuery('produccion');
+
+  assert.doesNotMatch(profitabilityQuery, /production_summary_harvests/);
+  assert.doesNotMatch(productionQuery, /production_summary_harvests/);
 });
 
 test('report queries return every matching detail and summary row without an arbitrary row cap', () => {

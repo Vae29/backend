@@ -464,10 +464,95 @@ export function buildReportQuery(reportType, rawFilters = {}, schemaCapabilities
       GROUP BY cc.idcultivo, ${harvestStageColumn}
     )`;
     ctes.push(harvestsByCropCte);
+    if (reportType === 'por-cultivo') {
+      const summaryConversionFields = hasUnitConversions
+        ? `base_unit.nombre AS unidad_base,
+           CASE
+             WHEN conv.factor_a_unidad_base IS NOT NULL
+              AND base_unit.nombre IS NOT NULL
+             THEN cc.cantidad_cosechada * conv.factor_a_unidad_base
+             ELSE NULL
+           END AS cantidad_convertida,
+             (conv.factor_a_unidad_base IS NULL OR base_unit.nombre IS NULL) AS sin_conversion`
+        : `um.nombre AS unidad_base,
+           cc.cantidad_cosechada AS cantidad_convertida,
+             (um.nombre IS NULL) AS sin_conversion`;
+      const summaryConversionJoins = hasUnitConversions
+        ? `LEFT JOIN conversion_unidades_cultivo conv
+             ON conv.idtipocultivo = fc.idtipocultivo
+            AND conv.idunidadmedida = cc.idunidadmedida
+           LEFT JOIN conversion_unidades_cultivo base_conv
+             ON base_conv.idtipocultivo = fc.idtipocultivo
+            AND base_conv.es_unidad_base = TRUE
+           LEFT JOIN unidades_medidas base_unit
+             ON base_unit.idunidadmedida = base_conv.idunidadmedida`
+        : '';
+      ctes.push(`production_summary_harvests AS (
+        SELECT cc.idcultivo AS cultivo_id,
+               fc.nombre AS cultivo,
+               cc.idunidadmedida AS unidad_id,
+               COALESCE(um.nombre, 'Unidad desconocida') AS unidad_original,
+               cc.cantidad_cosechada AS cantidad,
+               ${summaryConversionFields}
+        FROM cosecha cc
+        JOIN filtered_crops fc ON fc.idcultivo = cc.idcultivo
+        LEFT JOIN unidades_medidas um ON um.idunidadmedida = cc.idunidadmedida
+        ${summaryConversionJoins}
+        WHERE ${harvestConditions}
+      )`);
+      ctes.push(`production_summary_by_base_unit AS (
+        SELECT unidad_base, SUM(cantidad_convertida) AS cantidad
+        FROM production_summary_harvests
+        WHERE cantidad_convertida IS NOT NULL AND unidad_base IS NOT NULL
+        GROUP BY unidad_base
+      )`);
+      ctes.push(`production_summary_by_original_unit AS (
+        SELECT unidad_id, unidad_original, SUM(cantidad) AS cantidad
+        FROM production_summary_harvests
+        GROUP BY unidad_id, unidad_original
+      )`);
+      ctes.push(`production_summary AS (
+        SELECT jsonb_build_object(
+          'totalsByBaseUnit',
+          COALESCE((
+            SELECT jsonb_agg(jsonb_build_object('unidad', unidad_base, 'cantidad', cantidad) ORDER BY unidad_base)
+            FROM production_summary_by_base_unit
+          ), '[]'::jsonb),
+          'totalsByOriginalUnit',
+          COALESCE((
+            SELECT jsonb_agg(jsonb_build_object('unidadId', unidad_id, 'unidad', unidad_original, 'cantidad', cantidad) ORDER BY unidad_original)
+            FROM production_summary_by_original_unit
+          ), '[]'::jsonb),
+          'excludedHarvestCount',
+          (SELECT COUNT(*) FROM production_summary_harvests WHERE sin_conversion),
+          'excludedCropCount',
+          (SELECT COUNT(DISTINCT cultivo_id) FROM production_summary_harvests WHERE sin_conversion),
+          'pendingConversions',
+          COALESCE((
+            SELECT jsonb_agg(DISTINCT jsonb_build_object(
+              'cultivoId', cultivo_id,
+              'cultivo', cultivo,
+              'unidadId', unidad_id,
+              'unidad', unidad_original
+            ))
+            FROM production_summary_harvests
+            WHERE sin_conversion
+          ), '[]'::jsonb),
+          'harvestCount',
+          (SELECT COUNT(*) FROM production_summary_harvests)
+        ) AS summary
+      )`);
+    }
   }
 
   if (reportType === 'por-cultivo' || reportType === 'rentabilidad') {
     const orderBy = reportType === 'rentabilidad' ? 'ganancia DESC' : 'fc.nombre';
+    const productionSummarySelection = reportType === 'por-cultivo'
+      ? ', production_summary.summary AS production_summary'
+      : '';
+    const productionSummaryJoin = reportType === 'por-cultivo'
+      ? 'CROSS JOIN production_summary'
+      : '';
     return {
       query: `WITH ${ctes.join(',\n')},
         crop_cost_totals AS (
@@ -512,6 +597,7 @@ export function buildReportQuery(reportType, rawFilters = {}, schemaCapabilities
                     THEN COALESCE(cost_totals.costo_produccion, 0) / production_totals.total_produccion
                     ELSE NULL
                END AS costo_unitario
+               ${productionSummarySelection}
         FROM crop_stage_keys keys
         JOIN filtered_crops fc ON fc.idcultivo = keys.idcultivo
         LEFT JOIN etapa_cultivo ec ON ec.idetapacultivo = keys.idetapa_cultivo
@@ -524,6 +610,7 @@ export function buildReportQuery(reportType, rawFilters = {}, schemaCapabilities
          AND harvests.idetapa_cultivo IS NOT DISTINCT FROM keys.idetapa_cultivo
         LEFT JOIN crop_cost_totals cost_totals ON cost_totals.idcultivo = fc.idcultivo
         LEFT JOIN crop_production_totals production_totals ON production_totals.idcultivo = fc.idcultivo
+        ${productionSummaryJoin}
         ORDER BY ${orderBy}, fc.tipo_cultivo, fc.nombre, et.nombre_etapa`,
       params,
     };
