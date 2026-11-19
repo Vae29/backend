@@ -110,6 +110,89 @@ test('type-of-crop and stage filters constrain reports without interpolating inp
   assert.match(query, /ec\.idetapa = \$4/);
 });
 
+test('worker report falls back to assignments and registered costs without payment tables', () => {
+  const { query, params } = buildReportQuery('trabajador', {
+    fincaId: 7,
+    usuarioId: 5,
+    categoriaId: 4,
+    fechaInicio: '2026-03-01',
+  }, {
+    hasUnitConversions: false,
+    hasGeneralCostProration: false,
+    hasLaborPayments: false,
+    hasHarvestStage: false,
+  });
+
+  assert.deepEqual(params, [7, 4, '2026-03-01', '2026-03-01', 5]);
+  assert.doesNotMatch(query, /pago_mano_obra/);
+  assert.match(query, /worker_users AS \(/);
+  assert.match(query, /FROM usuario u/);
+  assert.match(query, /worker_farms AS \(/);
+  assert.match(query, /FROM usuario_finca uf/);
+  assert.match(query, /worker_crops AS \(/);
+  assert.match(query, /JOIN usuario_cultivo uc ON uc\.idcultivo = fc\.idcultivo/);
+  assert.match(query, /worker_costs AS \(/);
+  assert.match(query, /co\.id_usuario = \$5/);
+  assert.match(query, /uc\.id_usuario = \$5/);
+  assert.match(query, /'asignaciones'::text AS fuente/);
+  assert.match(query, /'Sin usuario'/);
+  assert.match(query, /COALESCE\(to_jsonb\(co\) ->> 'estado_registro', '1'\) IN \('1', 'ACTIVO'/);
+  assert.match(query, /COALESCE\(to_jsonb\(cc\) ->> 'estado_registro', '1'\) IN \('1', 'ACTIVO'/);
+  assert.doesNotMatch(query, /EXISTS \([\s\S]*uc\.id_usuario = \$1/);
+});
+
+test('worker report keeps payment-based costs when the payment table is available', () => {
+  const { query } = buildReportQuery('trabajador', {}, { hasLaborPayments: true });
+
+  assert.match(query, /FROM pago_mano_obra pm/);
+  assert.match(query, /'pagos'::text AS fuente/);
+  assert.doesNotMatch(query, /worker_users AS \(/);
+});
+
+test('legacy worker production reuses the crop conversion summary and stays shared per assigned user', () => {
+  const { query, params } = buildReportQuery('trabajador', {
+    fincaId: 2,
+    cultivoId: 8,
+    fechaInicio: '2026-04-01',
+    fechaFin: '2026-04-30',
+  }, {
+    hasUnitConversions: true,
+    hasGeneralCostProration: false,
+    hasLaborPayments: false,
+    hasHarvestStage: true,
+  });
+
+  assert.deepEqual(params, [
+    2, 8,
+    '2026-04-01', '2026-04-30',
+    '2026-04-01', '2026-04-30',
+  ]);
+  assert.match(query, /production_summary_harvests AS \(/);
+  assert.match(query, /worker_production_by_base_unit AS \(/);
+  assert.match(query, /SUM\(harvests\.cantidad_convertida\)/);
+  assert.match(query, /JOIN production_summary_harvests harvests/);
+  assert.doesNotMatch(query, /SUM\(harvests\.cantidad_convertida\)\s*\/\s*(?:COUNT|NULLIF)/);
+  assert.match(query, /cc\.fecha_cosecha >= \$5::date/);
+  assert.match(query, /co\.fecha >= \$3::date/);
+});
+
+test('legacy worker report keeps users without assignments and groups costs with no user', () => {
+  const { query } = buildReportQuery('trabajador', {}, {
+    hasUnitConversions: false,
+    hasGeneralCostProration: false,
+    hasLaborPayments: false,
+    hasHarvestStage: false,
+  });
+
+  assert.match(query, /worker_ids AS \([\s\S]*SELECT id_usuario FROM worker_users[\s\S]*UNION[\s\S]*WHERE id_usuario IS NULL/);
+  assert.match(query, /LEFT JOIN worker_crops/);
+  assert.match(query, /LEFT JOIN worker_production_summaries/);
+  assert.match(query, /IS NOT DISTINCT FROM worker_ids\.id_usuario/);
+  assert.match(query, /COALESCE\(worker_crops\.cultivos_asignados, 0\)/);
+  assert.match(query, /'harvestCount'/);
+  assert.match(query, /'totalsByOriginalUnit'/);
+});
+
 test('cost reports include allocated and unallocated general costs', () => {
   const { query, params } = buildReportQuery('costos', { fincaId: 7 });
 

@@ -1,5 +1,9 @@
 import * as reportExportModel from '../models/reportExportModel.js';
-import { buildReportModel, fetchReportData } from '../models/reportModel.js';
+import {
+  buildReportModel,
+  fetchReportData,
+  getWorkerReportSource,
+} from '../models/reportModel.js';
 import { generateReportExport } from '../services/reportExportService.js';
 
 const reportTypes = new Set(['por-cultivo', 'costos', 'produccion', 'rentabilidad', 'trabajador']);
@@ -117,12 +121,16 @@ export async function postReportExport(req, res) {
       });
     } else {
       const rows = await fetchReportData(tipo, filtros);
+      const fuente = tipo === 'trabajador'
+        ? rows[0]?.fuente || await getWorkerReportSource()
+        : undefined;
       report = await generateReportExport({
         reportType: tipo,
         format: formato,
         rows,
         filters: filtros,
         context,
+        fuente,
       });
       await reportExportModel.recordReportExport({
         fincaId: filtros.fincaId,

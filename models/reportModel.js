@@ -11,6 +11,11 @@ const includeInUnitCostExpression = `COALESCE(
   )
 )`;
 
+const schemaCapabilitiesCacheTtlMs = 30_000;
+let schemaCapabilitiesCache = null;
+let schemaCapabilitiesPromise = null;
+let hasWarnedAboutMissingLaborPayments = false;
+
 export async function getFilters(fincaId) {
   try {
     const filterFinca = Number.isInteger(Number(fincaId)) && Number(fincaId) > 0 ? Number(fincaId) : null;
@@ -51,16 +56,16 @@ export async function getFilters(fincaId) {
       ORDER BY sc.nombre
     `;
     const tiposCultivoQuery = `
-      SELECT idtipocultivo AS id, nombre
-      FROM tipos_cultivo
-      WHERE estado_registro = 1
-      ORDER BY nombre
+      SELECT tc.idtipocultivo AS id, tc.nombre
+      FROM tipos_cultivo tc
+      WHERE COALESCE((to_jsonb(tc) ->> 'estado_registro')::smallint, 1) = 1
+      ORDER BY tc.nombre
     `;
     const etapasQuery = `
-      SELECT idetapa AS id, nombre_etapa AS nombre
-      FROM etapas
-      WHERE estado_registro = 1
-      ORDER BY nombre_etapa
+      SELECT e.idetapa AS id, e.nombre_etapa AS nombre
+      FROM etapas e
+      WHERE COALESCE((to_jsonb(e) ->> 'estado_registro')::smallint, 1) = 1
+      ORDER BY e.nombre_etapa
     `;
 
     const [
@@ -128,7 +133,13 @@ function addDateConditions(where, params, alias, column, filters) {
   }
 }
 
-function buildFilteredCrops(filters, params, includeBaseUnit = false, hasUnitConversions = true) {
+function buildFilteredCrops(
+  filters,
+  params,
+  includeBaseUnit = false,
+  hasUnitConversions = true,
+  includeUserFilter = true,
+) {
   const where = [`cu.estado_registro = 1`];
 
   if (filters.fincaId) {
@@ -143,7 +154,7 @@ function buildFilteredCrops(filters, params, includeBaseUnit = false, hasUnitCon
     params.push(filters.tipoCultivoId);
     where.push(`cu.idtipocultivo = $${params.length}`);
   }
-  if (filters.usuarioId) {
+  if (filters.usuarioId && includeUserFilter) {
     params.push(filters.usuarioId);
     where.push(`EXISTS (
       SELECT 1 FROM usuario_cultivo uc
@@ -179,8 +190,8 @@ function buildFilteredCrops(filters, params, includeBaseUnit = false, hasUnitCon
   )`;
 }
 
-function buildCostConditions(filters, params) {
-  const where = [`co.estado_registro = 1`];
+function buildCostConditions(filters, params, registrationStateCondition = 'co.estado_registro = 1') {
+  const where = [registrationStateCondition];
 
   if (filters.categoriaId) {
     params.push(filters.categoriaId);
@@ -202,8 +213,13 @@ function buildCostConditions(filters, params) {
   return where.join(' AND ');
 }
 
-function buildHarvestConditions(filters, params, hasHarvestStage = true) {
-  const where = [`cc.estado_registro = 1`];
+function buildHarvestConditions(
+  filters,
+  params,
+  hasHarvestStage = true,
+  registrationStateCondition = 'cc.estado_registro = 1',
+) {
+  const where = [registrationStateCondition];
   if (filters.etapaId) {
     if (hasHarvestStage) {
       params.push(filters.etapaId);
@@ -225,18 +241,24 @@ export function buildReportQuery(reportType, rawFilters = {}, schemaCapabilities
   const hasUnitConversions = schemaCapabilities.hasUnitConversions !== false;
   const hasGeneralCostProration = schemaCapabilities.hasGeneralCostProration !== false;
   const hasHarvestStage = schemaCapabilities.hasHarvestStage !== false;
+  const hasLaborPayments = schemaCapabilities.hasLaborPayments !== false;
+  const hasLegacyWorkerReport = reportType === 'trabajador' && !hasLaborPayments;
   const params = [];
   const filteredCrops = buildFilteredCrops(
     filters,
     params,
     reportType === 'costos',
     hasUnitConversions,
+    !hasLegacyWorkerReport,
   );
   const ctes = [filteredCrops];
   let costConditions;
 
   if (['por-cultivo', 'costos', 'rentabilidad', 'trabajador'].includes(reportType)) {
-    costConditions = buildCostConditions(filters, params);
+    const costRegistrationStateCondition = hasLegacyWorkerReport
+      ? "COALESCE(to_jsonb(co) ->> 'estado_registro', '1') IN ('1', 'ACTIVO', 'Activo', 'activo', 'true', 'TRUE')"
+      : undefined;
+    costConditions = buildCostConditions(filters, params, costRegistrationStateCondition);
     if (reportType === 'costos') {
       const fincaCondition = filters.fincaId
         ? `co.idfinca = $${params.indexOf(filters.fincaId) + 1}`
@@ -374,8 +396,16 @@ export function buildReportQuery(reportType, rawFilters = {}, schemaCapabilities
     )`);
   }
 
-  if (['por-cultivo', 'produccion', 'rentabilidad'].includes(reportType)) {
-    const harvestConditions = buildHarvestConditions(filters, params, hasHarvestStage);
+  if (['por-cultivo', 'produccion', 'rentabilidad'].includes(reportType) || hasLegacyWorkerReport) {
+    const harvestRegistrationStateCondition = hasLegacyWorkerReport
+      ? "COALESCE(to_jsonb(cc) ->> 'estado_registro', '1') IN ('1', 'ACTIVO', 'Activo', 'activo', 'true', 'TRUE')"
+      : undefined;
+    const harvestConditions = buildHarvestConditions(
+      filters,
+      params,
+      hasHarvestStage,
+      harvestRegistrationStateCondition,
+    );
     const harvestStageColumn = hasHarvestStage ? 'cc.idetapa_cultivo' : 'NULL::integer';
     if (reportType === 'produccion') {
       const conversionFields = hasUnitConversions
@@ -463,8 +493,8 @@ export function buildReportQuery(reportType, rawFilters = {}, schemaCapabilities
       WHERE ${harvestConditions}
       GROUP BY cc.idcultivo, ${harvestStageColumn}
     )`;
-    ctes.push(harvestsByCropCte);
-    if (reportType === 'por-cultivo') {
+    if (!hasLegacyWorkerReport) ctes.push(harvestsByCropCte);
+    if (reportType === 'por-cultivo' || hasLegacyWorkerReport) {
       const summaryConversionFields = hasUnitConversions
         ? `base_unit.nombre AS unidad_base,
            CASE
@@ -500,18 +530,18 @@ export function buildReportQuery(reportType, rawFilters = {}, schemaCapabilities
         ${summaryConversionJoins}
         WHERE ${harvestConditions}
       )`);
-      ctes.push(`production_summary_by_base_unit AS (
+      if (reportType === 'por-cultivo') ctes.push(`production_summary_by_base_unit AS (
         SELECT unidad_base, SUM(cantidad_convertida) AS cantidad
         FROM production_summary_harvests
         WHERE cantidad_convertida IS NOT NULL AND unidad_base IS NOT NULL
         GROUP BY unidad_base
       )`);
-      ctes.push(`production_summary_by_original_unit AS (
+      if (reportType === 'por-cultivo') ctes.push(`production_summary_by_original_unit AS (
         SELECT unidad_id, unidad_original, SUM(cantidad) AS cantidad
         FROM production_summary_harvests
         GROUP BY unidad_id, unidad_original
       )`);
-      ctes.push(`production_summary AS (
+      if (reportType === 'por-cultivo') ctes.push(`production_summary AS (
         SELECT jsonb_build_object(
           'totalsByBaseUnit',
           COALESCE((
@@ -617,6 +647,196 @@ export function buildReportQuery(reportType, rawFilters = {}, schemaCapabilities
   }
 
   if (reportType === 'trabajador') {
+    if (hasLegacyWorkerReport) {
+      const userIdParameter = filters.usuarioId
+        ? (() => {
+            params.push(filters.usuarioId);
+            return `$${params.length}`;
+          })()
+        : null;
+      const userFilter = userIdParameter ? `AND u.id_usuario = ${userIdParameter}` : '';
+      const userCostFilter = userIdParameter ? `AND co.id_usuario = ${userIdParameter}` : '';
+      const farmFilter = filters.fincaId ? 'AND uf.idfinca = $1' : '';
+      const costFarmFilter = filters.fincaId ? 'AND co.idfinca = $1' : '';
+      const hasCropAttributeFilter = Boolean(
+        filters.cultivoId || filters.tipoCultivoId || filters.estadoId || filters.estado,
+      );
+      const includeGeneralCosts = !hasCropAttributeFilter && !filters.etapaId;
+      const costCropFilter = `(
+        (co.idcultivo IS NOT NULL AND fc.idcultivo IS NOT NULL)
+        OR (co.idcultivo IS NULL AND ${includeGeneralCosts ? 'TRUE' : 'FALSE'})
+      )`;
+      return {
+        query: `WITH ${ctes.join(',\n')},
+          worker_users AS (
+            SELECT u.id_usuario,
+                   CONCAT_WS(' ', u.primer_nombre, u.primer_apellido) AS nombre,
+                   r.nombre AS rol,
+                   CASE
+                     WHEN to_jsonb(u) ? 'estado_registro' OR to_jsonb(u) ? 'estado'
+                     THEN CASE
+                       WHEN COALESCE(
+                         to_jsonb(u) ->> 'estado_registro',
+                         to_jsonb(u) ->> 'estado'
+                       ) IN ('1', 'ACTIVO', 'Activo', 'activo', 'true', 'TRUE')
+                       THEN 'Activo'
+                       ELSE 'Inactivo'
+                     END
+                     ELSE NULL
+                   END AS estado
+            FROM usuario u
+            LEFT JOIN roles r ON r.id_roles = u.id_roles
+            WHERE TRUE ${userFilter}
+          ),
+          worker_farms AS (
+            SELECT uf.id_usuario,
+                   COUNT(DISTINCT uf.idfinca)::integer AS fincas_asignadas,
+                   COALESCE(
+                     ARRAY_AGG(DISTINCT f.nombre ORDER BY f.nombre)
+                       FILTER (WHERE f.nombre IS NOT NULL),
+                     ARRAY[]::text[]
+                   ) AS fincas
+            FROM usuario_finca uf
+            LEFT JOIN finca f ON f.idfinca = uf.idfinca
+            WHERE TRUE ${farmFilter}
+            GROUP BY uf.id_usuario
+          ),
+          user_crops AS (
+            SELECT DISTINCT uc.id_usuario, fc.idcultivo, fc.idtipocultivo
+            FROM filtered_crops fc
+            JOIN usuario_cultivo uc ON uc.idcultivo = fc.idcultivo
+            WHERE TRUE ${userIdParameter ? `AND uc.id_usuario = ${userIdParameter}` : ''}
+          ),
+          worker_crops AS (
+            SELECT uc.id_usuario,
+                   COUNT(DISTINCT uc.idcultivo)::integer AS cultivos_asignados,
+                   COALESCE(
+                     ARRAY_AGG(DISTINCT fc.nombre ORDER BY fc.nombre),
+                     ARRAY[]::text[]
+                   ) AS cultivos
+            FROM user_crops uc
+            JOIN filtered_crops fc ON fc.idcultivo = uc.idcultivo
+            GROUP BY uc.id_usuario
+          ),
+          worker_production_by_base_unit AS (
+            SELECT uc.id_usuario, harvests.unidad_base,
+                   SUM(harvests.cantidad_convertida) AS cantidad
+            FROM user_crops uc
+            JOIN production_summary_harvests harvests
+              ON harvests.cultivo_id = uc.idcultivo
+            WHERE harvests.cantidad_convertida IS NOT NULL
+              AND harvests.unidad_base IS NOT NULL
+            GROUP BY uc.id_usuario, harvests.unidad_base
+          ),
+          worker_production_by_original_unit AS (
+            SELECT uc.id_usuario, harvests.unidad_id, harvests.unidad_original,
+                   SUM(harvests.cantidad) AS cantidad
+            FROM user_crops uc
+            JOIN production_summary_harvests harvests
+              ON harvests.cultivo_id = uc.idcultivo
+            GROUP BY uc.id_usuario, harvests.unidad_id, harvests.unidad_original
+          ),
+          worker_production_summaries AS (
+            SELECT assigned.id_usuario,
+                   jsonb_build_object(
+                     'totalsByBaseUnit',
+                     COALESCE((
+                       SELECT jsonb_agg(
+                         jsonb_build_object('unidad', base.unidad_base, 'cantidad', base.cantidad)
+                         ORDER BY base.unidad_base
+                       )
+                       FROM worker_production_by_base_unit base
+                       WHERE base.id_usuario = assigned.id_usuario
+                     ), '[]'::jsonb),
+                     'totalsByOriginalUnit',
+                     COALESCE((
+                       SELECT jsonb_agg(
+                         jsonb_build_object(
+                           'unidadId', original.unidad_id,
+                           'unidad', original.unidad_original,
+                           'cantidad', original.cantidad
+                         )
+                         ORDER BY original.unidad_original
+                       )
+                       FROM worker_production_by_original_unit original
+                       WHERE original.id_usuario = assigned.id_usuario
+                     ), '[]'::jsonb),
+                     'excludedHarvestCount',
+                     (SELECT COUNT(*)
+                      FROM user_crops uc
+                      JOIN production_summary_harvests harvests
+                        ON harvests.cultivo_id = uc.idcultivo
+                      WHERE uc.id_usuario = assigned.id_usuario
+                        AND harvests.sin_conversion),
+                     'excludedCropCount',
+                     (SELECT COUNT(DISTINCT harvests.cultivo_id)
+                      FROM user_crops uc
+                      JOIN production_summary_harvests harvests
+                        ON harvests.cultivo_id = uc.idcultivo
+                      WHERE uc.id_usuario = assigned.id_usuario
+                        AND harvests.sin_conversion),
+                     'pendingConversions',
+                     COALESCE((
+                       SELECT jsonb_agg(DISTINCT jsonb_build_object(
+                         'cultivoId', harvests.cultivo_id,
+                         'cultivo', harvests.cultivo,
+                         'unidadId', harvests.unidad_id,
+                         'unidad', harvests.unidad_original
+                       ))
+                       FROM user_crops uc
+                       JOIN production_summary_harvests harvests
+                         ON harvests.cultivo_id = uc.idcultivo
+                       WHERE uc.id_usuario = assigned.id_usuario
+                         AND harvests.sin_conversion
+                     ), '[]'::jsonb),
+                     'harvestCount',
+                     (SELECT COUNT(*)
+                      FROM user_crops uc
+                      JOIN production_summary_harvests harvests
+                        ON harvests.cultivo_id = uc.idcultivo
+                      WHERE uc.id_usuario = assigned.id_usuario)
+                   ) AS production_summary
+            FROM (SELECT DISTINCT id_usuario FROM user_crops) assigned
+          ),
+          worker_costs AS (
+            SELECT co.id_usuario, SUM(co.valor) AS costos_registrados
+            FROM costo co
+            LEFT JOIN filtered_crops fc ON fc.idcultivo = co.idcultivo
+            LEFT JOIN subcategoria_costo sc ON sc.idsubcategoria = co.idsubcategoria
+            WHERE ${costConditions}
+              AND ${costCropFilter}
+              ${costFarmFilter}
+              ${userCostFilter}
+            GROUP BY co.id_usuario
+          ),
+          worker_ids AS (
+            SELECT id_usuario FROM worker_users
+            UNION
+            SELECT id_usuario FROM worker_costs WHERE id_usuario IS NULL
+          )
+          SELECT worker_ids.id_usuario AS id,
+                 COALESCE(worker_users.nombre, 'Sin usuario') AS nombre,
+                 worker_users.rol,
+                 worker_users.estado,
+                 COALESCE(worker_farms.fincas_asignadas, 0) AS fincas_asignadas,
+                 COALESCE(worker_farms.fincas, ARRAY[]::text[]) AS fincas,
+                 COALESCE(worker_crops.cultivos_asignados, 0) AS cultivos_asignados,
+                 COALESCE(worker_crops.cultivos, ARRAY[]::text[]) AS cultivos,
+                 worker_production_summaries.production_summary,
+                 COALESCE(worker_costs.costos_registrados, 0) AS costos_registrados,
+                 'asignaciones'::text AS fuente
+          FROM worker_ids
+          LEFT JOIN worker_users ON worker_users.id_usuario = worker_ids.id_usuario
+          LEFT JOIN worker_farms ON worker_farms.id_usuario = worker_ids.id_usuario
+          LEFT JOIN worker_crops ON worker_crops.id_usuario = worker_ids.id_usuario
+          LEFT JOIN worker_production_summaries
+            ON worker_production_summaries.id_usuario = worker_ids.id_usuario
+          LEFT JOIN worker_costs ON worker_costs.id_usuario IS NOT DISTINCT FROM worker_ids.id_usuario
+          ORDER BY nombre`,
+        params,
+      };
+    }
+
     const userFilter = filters.usuarioId ? (() => {
       params.push(filters.usuarioId);
       return `AND uc.id_usuario = $${params.length}`;
@@ -657,7 +877,8 @@ export function buildReportQuery(reportType, rawFilters = {}, schemaCapabilities
                tc.nombre AS tipo_cultivo,
                et.nombre_etapa AS etapa,
                COALESCE(labor.total_costos, 0) AS total_costos,
-               COALESCE(assigned.cultivos_asignados, 0) AS cultivos_asignados
+               COALESCE(assigned.cultivos_asignados, 0) AS cultivos_asignados,
+               'pagos'::text AS fuente
         FROM worker_type_keys keys
         JOIN usuario u ON u.id_usuario = keys.id_usuario
         LEFT JOIN tipos_cultivo tc ON tc.idtipocultivo = keys.idtipocultivo
@@ -679,11 +900,18 @@ export function buildReportQuery(reportType, rawFilters = {}, schemaCapabilities
 }
 
 async function getSchemaCapabilities(client) {
-  const result = await client.query(`
+  if (schemaCapabilitiesCache && schemaCapabilitiesCache.expiresAt > Date.now()) {
+    return schemaCapabilitiesCache.value;
+  }
+  if (schemaCapabilitiesPromise) return schemaCapabilitiesPromise;
+
+  schemaCapabilitiesPromise = client.query(`
     SELECT to_regclass('public.conversion_unidades_cultivo') IS NOT NULL
              AS "hasUnitConversions",
            to_regclass('public.prorrateo_costos_generales') IS NOT NULL
              AS "hasGeneralCostProration",
+           to_regclass('public.pago_mano_obra') IS NOT NULL
+             AS "hasLaborPayments",
            EXISTS (
              SELECT 1
              FROM information_schema.columns
@@ -691,8 +919,27 @@ async function getSchemaCapabilities(client) {
                AND table_name = 'cosecha'
                AND column_name = 'idetapa_cultivo'
            ) AS "hasHarvestStage"
-  `);
-  return result.rows[0];
+  `).then((result) => {
+    const capabilities = result.rows[0];
+    schemaCapabilitiesCache = {
+      value: capabilities,
+      expiresAt: Date.now() + schemaCapabilitiesCacheTtlMs,
+    };
+    return capabilities;
+  }).finally(() => {
+    schemaCapabilitiesPromise = null;
+  });
+  return schemaCapabilitiesPromise;
+}
+
+export async function getWorkerReportSource() {
+  const client = await pool.connect();
+  try {
+    const schemaCapabilities = await getSchemaCapabilities(client);
+    return schemaCapabilities.hasLaborPayments ? 'pagos' : 'asignaciones';
+  } finally {
+    client.release();
+  }
 }
 
 async function runReport(reportType, filters) {
@@ -701,6 +948,14 @@ async function runReport(reportType, filters) {
   let params;
   try {
     const schemaCapabilities = await getSchemaCapabilities(client);
+    if (reportType === 'trabajador' && !schemaCapabilities.hasLaborPayments && !hasWarnedAboutMissingLaborPayments) {
+      console.warn(
+        '[Reportes] pago_mano_obra no existe; Por trabajador usará asignaciones y costos registrados por usuario.',
+      );
+      hasWarnedAboutMissingLaborPayments = true;
+    } else if (reportType === 'trabajador' && schemaCapabilities.hasLaborPayments) {
+      hasWarnedAboutMissingLaborPayments = false;
+    }
     ({ query, params } = buildReportQuery(reportType, filters, schemaCapabilities));
     const result = await client.query(query, params);
     return result.rows;

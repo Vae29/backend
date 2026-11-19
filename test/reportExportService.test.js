@@ -91,6 +91,113 @@ test('PDF export is generated from report data as a selectable-text PDF', async 
   assert.equal(report.rowCount, 1);
 });
 
+const assignmentWorkerRows = [{
+  id: 7,
+  nombre: 'Ana Pérez',
+  rol: 'Administradora',
+  estado: 'Activo',
+  fincas_asignadas: 1,
+  fincas: ['Finca Norte'],
+  cultivos_asignados: 1,
+  cultivos: ['Tomate'],
+  production_summary: {
+    totalsByBaseUnit: [{ unidad: 'kg', cantidad: 120 }],
+    totalsByOriginalUnit: [{ unidad: 'kg', cantidad: 120 }, { unidad: 'caja', cantidad: 3 }],
+    excludedHarvestCount: 1,
+    harvestCount: 4,
+  },
+  costos_registrados: 50000,
+  fuente: 'asignaciones',
+}, {
+  id: null,
+  nombre: 'Sin usuario',
+  fincas_asignadas: 0,
+  fincas: [],
+  cultivos_asignados: 0,
+  cultivos: [],
+  production_summary: null,
+  costos_registrados: 2500,
+  fuente: 'asignaciones',
+}];
+
+test('assignment worker CSV uses its title, notice, explicit headers and registered cost values', async () => {
+  const report = await generateReportExport({
+    reportType: 'trabajador',
+    format: 'csv',
+    rows: assignmentWorkerRows,
+    filters: { fincaId: 1 },
+    context,
+    fuente: 'asignaciones',
+  });
+  const csv = report.buffer.toString('utf8');
+
+  assert.match(csv, /Trabajadores y asignaciones/);
+  assert.match(csv, /Pagos por trabajador no disponibles: requiere la migración 002/);
+  assert.match(csv, /Producción de sus cultivos \(compartida con el equipo, no individual\)/);
+  assert.match(csv, /Costos registrados/);
+  assert.match(csv, /120 kg \(excluye 1 cosechas sin conversión\)/);
+  assert.match(csv, /Sin usuario/);
+  assert.equal(report.rowCount, 2);
+});
+
+test('assignment worker Excel uses alternate title, columns and costs summary', async () => {
+  const report = await generateReportExport({
+    reportType: 'trabajador',
+    format: 'xlsx',
+    rows: assignmentWorkerRows,
+    filters: { fincaId: 1 },
+    context,
+    fuente: 'asignaciones',
+  });
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(report.buffer);
+  const detail = workbook.getWorksheet('Detalle');
+  const summary = workbook.getWorksheet('Resumen');
+
+  assert.equal(summary.getCell('B3').value, 'Trabajadores y asignaciones');
+  assert.equal(summary.getCell('A13').value, 'Aviso');
+  assert.ok(summary.getColumn(1).values.includes('Total costos registrados COP'));
+  assert.ok(detail.getRow(1).values.includes('Costos registrados'));
+  assert.ok(detail.getRow(1).values.includes(
+    'Producción de sus cultivos (compartida con el equipo, no individual)',
+  ));
+  assert.equal(detail.getCell('I2').value, 50000);
+  assert.equal(detail.getCell('I4').value.formula, 'SUBTOTAL(109,I2:I3)');
+});
+
+test('assignment worker PDF uses alternate report title and headings', async () => {
+  const report = await generateReportExport({
+    reportType: 'trabajador',
+    format: 'pdf',
+    rows: assignmentWorkerRows,
+    filters: { fincaId: 1 },
+    context,
+    fuente: 'asignaciones',
+  });
+  const pdfText = report.buffer.toString('latin1');
+
+  assert.equal(report.buffer.subarray(0, 4).toString('ascii'), '%PDF');
+  assert.match(pdfText, /Trabajadores y asignaciones/);
+  assert.match(pdfText, /Costos registrados/);
+  assert.match(pdfText, /producción de sus cultivos/i);
+});
+
+test('empty assignment worker export still uses the explicit source metadata', async () => {
+  const report = await generateReportExport({
+    reportType: 'trabajador',
+    format: 'csv',
+    rows: [],
+    filters: { fincaId: 1 },
+    context,
+    fuente: 'asignaciones',
+  });
+  const csv = report.buffer.toString('utf8');
+
+  assert.match(csv, /Trabajadores y asignaciones/);
+  assert.match(csv, /Fincas asignadas \(conteo\)/);
+  assert.equal(report.rowCount, 0);
+});
+
 function costsModel(costRows, harvestRows = []) {
   return assembleCostsReportModel({
     costRows,

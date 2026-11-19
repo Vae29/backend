@@ -13,11 +13,16 @@ export async function getReportFilters(req, res) {
   }
 }
 
-function sendReportResponse(res, data) {
+function sendReportResponse(res, data, metadata = {}) {
   if (!Array.isArray(data) || data.length === 0) {
-    return res.json({ success: true, data: [], message: 'Sin resultados para los filtros seleccionados' });
+    return res.json({
+      success: true,
+      data: [],
+      message: 'Sin resultados para los filtros seleccionados',
+      ...metadata,
+    });
   }
-  return res.json({ success: true, data });
+  return res.json({ success: true, data, ...metadata });
 }
 
 export async function postReportQuery(req, res) {
@@ -62,7 +67,10 @@ export async function postReportQuery(req, res) {
         return res.status(400).json({ success: false, message: 'reportType desconocido' });
     }
 
-    return sendReportResponse(res, data);
+    const metadata = reportType === 'trabajador'
+      ? { fuente: data[0]?.fuente || await reportModel.getWorkerReportSource() }
+      : {};
+    return sendReportResponse(res, data, metadata);
   } catch (error) {
     console.error('Error en postReportQuery:', { body: req.body, error: error.stack || error });
     return res.status(500).json({ success: false, message: 'Error ejecutando reporte' });
@@ -125,7 +133,8 @@ export async function postReportTrabajador(req, res) {
   try {
     const filters = req.body || {};
     const data = await reportModel.reportByTrabajador(filters);
-    return sendReportResponse(res, data);
+    const fuente = data[0]?.fuente || await reportModel.getWorkerReportSource();
+    return sendReportResponse(res, data, { fuente });
   } catch (error) {
     console.error('Error en postReportTrabajador:', { body: req.body, error: error.stack || error });
     return res.status(500).json({ success: false, message: 'Error ejecutando reporte por trabajador' });

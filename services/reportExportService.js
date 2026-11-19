@@ -58,12 +58,61 @@ const extraColumns = {
   ],
 };
 
+const assignmentWorkerColumns = [
+  { key: 'trabajador', header: 'Usuario', type: 'text' },
+  { key: 'rol', header: 'Rol', type: 'text' },
+  { key: 'estado', header: 'Estado', type: 'text' },
+  { key: 'fincas_asignadas', header: 'Fincas asignadas (conteo)', type: 'number' },
+  { key: 'fincas', header: 'Fincas asignadas (nombres)', type: 'text' },
+  { key: 'cultivos_asignados', header: 'Cultivos asignados (conteo)', type: 'number' },
+  { key: 'cultivos', header: 'Cultivos asignados (nombres)', type: 'text' },
+  {
+    key: 'produccion_sus_cultivos',
+    header: 'Producción de sus cultivos (compartida con el equipo, no individual)',
+    type: 'text',
+  },
+  { key: 'costos_registrados', header: 'Costos registrados', type: 'currency' },
+];
+
 const copFormatter = new Intl.NumberFormat('es-CO', {
   style: 'currency',
   currency: 'COP',
 });
 
-function columnsFor(reportType) {
+function isAssignmentWorkerReport(reportType, rows = [], fuente = null) {
+  return reportType === 'trabajador' && (fuente || rows[0]?.fuente) === 'asignaciones';
+}
+
+function reportTitle(reportType, rows = [], fuente = null) {
+  return isAssignmentWorkerReport(reportType, rows, fuente)
+    ? 'Trabajadores y asignaciones'
+    : reportLabels[reportType];
+}
+
+function assignmentWorkerNotice() {
+  return 'Pagos por trabajador no disponibles: requiere la migración 002 (pendiente de aplicar). Las asignaciones no tienen fechas; el rango solo afecta producción y costos. La producción de cultivos compartidos no es individual.';
+}
+
+function formatWorkerProduction(summary) {
+  if (!summary || Number(summary.harvestCount) <= 0) return '—';
+  const baseTotals = Array.isArray(summary.totalsByBaseUnit) ? summary.totalsByBaseUnit : [];
+  const originalTotals = Array.isArray(summary.totalsByOriginalUnit) ? summary.totalsByOriginalUnit : [];
+  const originalByUnit = [...originalTotals.reduce((totals, item) => {
+    totals.set(item.unidad, (totals.get(item.unidad) || 0) + Number(item.cantidad || 0));
+    return totals;
+  }, new Map())];
+  let value = baseTotals.length === 1
+    ? `${Number(baseTotals[0].cantidad).toLocaleString('es-CO')} ${baseTotals[0].unidad}`
+    : originalByUnit.length
+      ? originalByUnit.map(([unit, quantity]) => `${quantity.toLocaleString('es-CO')} ${unit}`).join(' · ')
+      : 'No comparable: no se pudo identificar la unidad de las cosechas';
+  const excludedCount = Number(summary.excludedHarvestCount) || 0;
+  if (excludedCount > 0) value += ` (excluye ${excludedCount} cosechas sin conversión)`;
+  return value;
+}
+
+function columnsFor(reportType, rows = [], fuente = null) {
+  if (isAssignmentWorkerReport(reportType, rows, fuente)) return assignmentWorkerColumns;
   const columns = [...commonColumns, ...(extraColumns[reportType] || [])];
   if (reportType === 'rentabilidad') {
     return columns.map((column) =>
@@ -130,6 +179,7 @@ function valueFor(reportType, row, key) {
       return row.porcentaje_prorrateo == null ? null : Number(row.porcentaje_prorrateo);
     case 'cantidad':
     case 'cantidad_unidad_base':
+    case 'fincas_asignadas':
     case 'cultivos_asignados':
       return row[key] == null ? null : Number(row[key]);
     case 'unidad':
@@ -142,13 +192,22 @@ function valueFor(reportType, row, key) {
     }
     case 'trabajador':
       return row.nombre ?? null;
+    case 'rol':
+      return row.rol ?? null;
+    case 'fincas':
+    case 'cultivos':
+      return Array.isArray(row[key]) ? row[key].join(', ') : row[key] ?? null;
+    case 'produccion_sus_cultivos':
+      return formatWorkerProduction(row.production_summary);
+    case 'costos_registrados':
+      return row.costos_registrados == null ? 0 : Number(row.costos_registrados);
     default:
       return row[key] ?? null;
   }
 }
 
-function exportRows(reportType, rows) {
-  const columns = columnsFor(reportType);
+function exportRows(reportType, rows, fuente = null) {
+  const columns = columnsFor(reportType, rows, fuente);
   return rows.map((row) =>
     Object.fromEntries(columns.map((column) => [column.key, valueFor(reportType, row, column.key)]))
   );
@@ -171,9 +230,20 @@ function csvCell(value) {
   return /[;"\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
-function buildCsv(reportType, rows) {
-  const columns = columnsFor(reportType);
+function buildCsv(reportType, rows, fuente = null) {
+  const columns = columnsFor(reportType, rows, fuente);
+  const isAssignmentMode = isAssignmentWorkerReport(reportType, rows, fuente);
   const output = [
+    ...(isAssignmentMode
+      ? [
+          [reportTitle(reportType, rows, fuente), ...Array(columns.length - 1).fill('')]
+            .map(csvCell)
+            .join(';'),
+          [assignmentWorkerNotice(), ...Array(columns.length - 1).fill('')]
+            .map(csvCell)
+            .join(';'),
+        ]
+      : []),
     columns.map((column) => csvCell(column.header)).join(';'),
     ...rows.map((row) =>
       columns.map((column) => {
@@ -190,13 +260,13 @@ function buildCsv(reportType, rows) {
   return Buffer.from(`\uFEFF${output}`, 'utf8');
 }
 
-function reportTotals(reportType, rows) {
-  const exported = exportRows(reportType, rows);
+function reportTotals(reportType, rows, fuente = null) {
+  const exported = exportRows(reportType, rows, fuente);
   const totals = { value: 0, income: 0, costs: 0, profit: 0 };
   for (const row of exported) {
     totals.value += Number(row.valor) || 0;
     totals.income += Number(row.ingresos) || 0;
-    totals.costs += Number(row.costos) || 0;
+    totals.costs += Number(row.costos ?? row.costos_registrados) || 0;
     totals.profit += Number(row.ganancia) || 0;
   }
   totals.margin = totals.income > 0 ? totals.profit / totals.income : 0;
@@ -208,7 +278,8 @@ function filterSummary(filters) {
   return entries.length ? JSON.stringify(Object.fromEntries(entries)) : 'Sin filtros adicionales';
 }
 
-function addSummarySheet(workbook, reportType, filters, context, rowCount, totals, generatedAt) {
+function addSummarySheet(workbook, reportType, filters, context, rowCount, totals, generatedAt, fuente = null) {
+  const isAssignmentMode = isAssignmentWorkerReport(reportType, [], fuente);
   const sheet = workbook.addWorksheet('Resumen');
   sheet.columns = [
     { header: 'Dato', key: 'label', width: 28 },
@@ -216,17 +287,18 @@ function addSummarySheet(workbook, reportType, filters, context, rowCount, total
   ];
   const values = [
     ['Finca', context.finca],
-    ['Tipo de reporte', reportLabels[reportType]],
+    ['Tipo de reporte', reportTitle(reportType, [], fuente)],
     ['Filtros aplicados', filterSummary(filters)],
     ['Fecha de generación', generatedAt],
     ['Usuario', context.usuario],
     ['Número de filas', rowCount],
     ['Total valor COP', totals.value],
     ['Total ingresos COP', totals.income],
-    ['Total costos COP', totals.costs],
+    [isAssignmentMode ? 'Total costos registrados COP' : 'Total costos COP', totals.costs],
     ['Ganancia COP', totals.profit],
     ['Margen', totals.margin],
   ];
+  if (isAssignmentMode) values.push(['Aviso', assignmentWorkerNotice()]);
   for (const [label, value] of values) {
     sheet.addRow({ label, value });
   }
@@ -239,15 +311,15 @@ function addSummarySheet(workbook, reportType, filters, context, rowCount, total
   sheet.getCell('B4').value = generatedAt;
 }
 
-function buildExcel(reportType, rows, filters, context, generatedAt) {
+function buildExcel(reportType, rows, filters, context, generatedAt, fuente = null) {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'AgroGestión';
   workbook.created = generatedAt;
   workbook.calcProperties = { fullCalcOnLoad: true, forceFullCalc: true };
-  const columns = columnsFor(reportType);
-  const exported = exportRows(reportType, rows);
-  const totals = reportTotals(reportType, rows);
-  addSummarySheet(workbook, reportType, filters, context, rows.length, totals, generatedAt);
+  const columns = columnsFor(reportType, rows, fuente);
+  const exported = exportRows(reportType, rows, fuente);
+  const totals = reportTotals(reportType, rows, fuente);
+  addSummarySheet(workbook, reportType, filters, context, rows.length, totals, generatedAt, fuente);
 
   const sheet = workbook.addWorksheet('Detalle');
   sheet.columns = columns.map((column) => ({
@@ -289,7 +361,7 @@ function buildExcel(reportType, rows, filters, context, generatedAt) {
   const lastDataRow = rows.length + 1;
   const totalsRow = sheet.addRow(columns.map((column, index) => {
     if (index === 0) return 'TOTAL';
-    if (['valor', 'ingresos', 'costos', 'ganancia'].includes(column.key) && rows.length) {
+    if (['valor', 'ingresos', 'costos', 'costos_registrados', 'ganancia'].includes(column.key) && rows.length) {
       const letter = sheet.getColumn(index + 1).letter;
       return { formula: `SUBTOTAL(109,${letter}${firstDataRow}:${letter}${lastDataRow})` };
     }
@@ -326,21 +398,22 @@ function formattedValue(reportType, row, column) {
   return String(value);
 }
 
-function buildPdf(reportType, rows, filters, context, generatedAt) {
-  const landscape = ['costos', 'produccion', 'rentabilidad'].includes(reportType);
+function buildPdf(reportType, rows, filters, context, generatedAt, fuente = null) {
+  const isAssignmentMode = isAssignmentWorkerReport(reportType, rows, fuente);
+  const landscape = ['costos', 'produccion', 'rentabilidad'].includes(reportType) || isAssignmentMode;
   const doc = new jsPDF({
     orientation: landscape ? 'landscape' : 'portrait',
     unit: 'pt',
     format: 'a4',
   });
-  const columns = columnsFor(reportType);
-  const totals = reportTotals(reportType, rows);
+  const columns = columnsFor(reportType, rows, fuente);
+  const totals = reportTotals(reportType, rows, fuente);
   const margin = 30;
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const period = `${filters.fechaInicio || 'Inicio'} a ${filters.fechaFin || 'Hoy'}`;
   const filterLines = doc.splitTextToSize(
-    `Periodo: ${period} · Filtros: ${filterSummary(filters)}`,
+    `Periodo: ${period} · Filtros: ${filterSummary(filters)}${isAssignmentMode ? ` · ${assignmentWorkerNotice()}` : ''}`,
     pageWidth - margin * 2
   );
   const tableTop = 55 + filterLines.length * 10;
@@ -367,7 +440,9 @@ function buildPdf(reportType, rows, filters, context, generatedAt) {
   for (const [index, column] of columns.entries()) {
     if (column.key === 'valor') totalRow[index] = copFormatter.format(totals.value);
     if (column.key === 'ingresos') totalRow[index] = copFormatter.format(totals.income);
-    if (column.key === 'costos') totalRow[index] = copFormatter.format(totals.costs);
+    if (column.key === 'costos' || column.key === 'costos_registrados') {
+      totalRow[index] = copFormatter.format(totals.costs);
+    }
     if (column.key === 'ganancia') totalRow[index] = copFormatter.format(totals.profit);
     if (column.key === 'margen') totalRow[index] = `${(totals.margin * 100).toFixed(2)}%`;
   }
@@ -394,8 +469,10 @@ function buildPdf(reportType, rows, filters, context, generatedAt) {
   });
 
   const generatedLabel = generatedAt.toLocaleString('es-CO', { timeZone: 'America/Bogota' });
-  const title = `${reportLabels[reportType]} · ${context.finca}`;
-  const summary = `Filas: ${rows.length} · Total COP: ${copFormatter.format(totals.value)} · Ganancia COP: ${copFormatter.format(totals.profit)}`;
+  const title = `${reportTitle(reportType, rows, fuente)} · ${context.finca}`;
+  const summary = isAssignmentMode
+    ? `Usuarios: ${rows.filter((row) => row.id != null).length} · Costos registrados COP: ${copFormatter.format(totals.costs)}`
+    : `Filas: ${rows.length} · Total COP: ${copFormatter.format(totals.value)} · Ganancia COP: ${copFormatter.format(totals.profit)}`;
   for (let page = 1; page <= doc.internal.getNumberOfPages(); page += 1) {
     doc.setPage(page);
     doc.setFont('helvetica', 'bold');
@@ -870,7 +947,7 @@ function buildCostsPdf(model) {
   return Buffer.from(doc.output('arraybuffer'));
 }
 
-export async function generateReportExport({ reportType, format, rows, filters, context, model }) {
+export async function generateReportExport({ reportType, format, rows, filters, context, model, fuente = null }) {
   if (reportType === 'costos' && model && format === 'xlsx') {
     const buffer = await buildCostsExcel(model);
     return {
@@ -891,14 +968,14 @@ export async function generateReportExport({ reportType, format, rows, filters, 
   const generatedAt = new Date();
   if (format === 'csv') {
     return {
-      buffer: buildCsv(reportType, rows),
+      buffer: buildCsv(reportType, rows, fuente),
       contentType: 'text/csv; charset=utf-8',
       extension: 'csv',
       rowCount: rows.length,
     };
   }
   if (format === 'xlsx') {
-    const buffer = await buildExcel(reportType, rows, filters, context, generatedAt);
+    const buffer = await buildExcel(reportType, rows, filters, context, generatedAt, fuente);
     return {
       buffer: Buffer.from(buffer),
       contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -908,7 +985,7 @@ export async function generateReportExport({ reportType, format, rows, filters, 
   }
   if (format === 'pdf') {
     return {
-      buffer: buildPdf(reportType, rows, filters, context, generatedAt),
+      buffer: buildPdf(reportType, rows, filters, context, generatedAt, fuente),
       contentType: 'application/pdf',
       extension: 'pdf',
       rowCount: rows.length,
