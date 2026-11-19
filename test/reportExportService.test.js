@@ -120,7 +120,7 @@ const assignmentWorkerRows = [{
   fuente: 'asignaciones',
 }];
 
-test('assignment worker CSV uses its title, notice, explicit headers and registered cost values', async () => {
+test('assignment worker CSV uses its title, explicit headers and registered cost values without notices', async () => {
   const report = await generateReportExport({
     reportType: 'trabajador',
     format: 'csv',
@@ -132,7 +132,7 @@ test('assignment worker CSV uses its title, notice, explicit headers and registe
   const csv = report.buffer.toString('utf8');
 
   assert.match(csv, /Trabajadores y asignaciones/);
-  assert.match(csv, /Pagos por trabajador no disponibles: requiere la migración 002/);
+  assert.doesNotMatch(csv, /Pagos por trabajador no disponibles|Las asignaciones no tienen fechas/);
   assert.match(csv, /Producción de sus cultivos \(compartida con el equipo, no individual\)/);
   assert.match(csv, /Costos registrados/);
   assert.match(csv, /120 kg \(excluye 1 cosechas sin conversión\)/);
@@ -155,7 +155,7 @@ test('assignment worker Excel uses alternate title, columns and costs summary', 
   const summary = workbook.getWorksheet('Resumen');
 
   assert.equal(summary.getCell('B3').value, 'Trabajadores y asignaciones');
-  assert.equal(summary.getCell('A13').value, 'Aviso');
+  assert.doesNotMatch(summary.getColumn(1).values.join(' '), /Aviso/);
   assert.ok(summary.getColumn(1).values.includes('Total costos registrados COP'));
   assert.ok(detail.getRow(1).values.includes('Costos registrados'));
   assert.ok(detail.getRow(1).values.includes(
@@ -180,6 +180,7 @@ test('assignment worker PDF uses alternate report title and headings', async () 
   assert.match(pdfText, /Trabajadores y asignaciones/);
   assert.match(pdfText, /Costos registrados/);
   assert.match(pdfText, /producción de sus cultivos/i);
+  assert.doesNotMatch(pdfText, /Pagos por trabajador no disponibles|Las asignaciones no tienen fechas/);
 });
 
 test('empty assignment worker export still uses the explicit source metadata', async () => {

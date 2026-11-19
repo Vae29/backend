@@ -89,10 +89,6 @@ function reportTitle(reportType, rows = [], fuente = null) {
     : reportLabels[reportType];
 }
 
-function assignmentWorkerNotice() {
-  return 'Pagos por trabajador no disponibles: requiere la migración 002 (pendiente de aplicar). Las asignaciones no tienen fechas; el rango solo afecta producción y costos. La producción de cultivos compartidos no es individual.';
-}
-
 function formatWorkerProduction(summary) {
   if (!summary || Number(summary.harvestCount) <= 0) return '—';
   const baseTotals = Array.isArray(summary.totalsByBaseUnit) ? summary.totalsByBaseUnit : [];
@@ -239,9 +235,6 @@ function buildCsv(reportType, rows, fuente = null) {
           [reportTitle(reportType, rows, fuente), ...Array(columns.length - 1).fill('')]
             .map(csvCell)
             .join(';'),
-          [assignmentWorkerNotice(), ...Array(columns.length - 1).fill('')]
-            .map(csvCell)
-            .join(';'),
         ]
       : []),
     columns.map((column) => csvCell(column.header)).join(';'),
@@ -298,7 +291,6 @@ function addSummarySheet(workbook, reportType, filters, context, rowCount, total
     ['Ganancia COP', totals.profit],
     ['Margen', totals.margin],
   ];
-  if (isAssignmentMode) values.push(['Aviso', assignmentWorkerNotice()]);
   for (const [label, value] of values) {
     sheet.addRow({ label, value });
   }
@@ -413,7 +405,7 @@ function buildPdf(reportType, rows, filters, context, generatedAt, fuente = null
   const pageHeight = doc.internal.pageSize.getHeight();
   const period = `${filters.fechaInicio || 'Inicio'} a ${filters.fechaFin || 'Hoy'}`;
   const filterLines = doc.splitTextToSize(
-    `Periodo: ${period} · Filtros: ${filterSummary(filters)}${isAssignmentMode ? ` · ${assignmentWorkerNotice()}` : ''}`,
+    `Periodo: ${period} · Filtros: ${filterSummary(filters)}`,
     pageWidth - margin * 2
   );
   const tableTop = 55 + filterLines.length * 10;
