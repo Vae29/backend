@@ -15,7 +15,38 @@ async function hasPublicColumn(tableName, columnName) {
   return Boolean(result.rows[0]?.available)
 }
 
-async function assertManualMateriaPrimaNotUsed(subcategoryId, costId = null) {
+async function materiaPrimaDetailsProjection() {
+  const migration = await pool.query(
+    `SELECT to_regclass('public.costo_insumo_detalle') IS NOT NULL AS available`
+  );
+  if (!migration.rows[0]?.available) {
+    return `'[]'::jsonb AS "materiaPrimaDetalles"`;
+  }
+  return `COALESCE((
+    SELECT jsonb_agg(
+      jsonb_build_object(
+        'idKardex', d.id_kardex,
+        'producto', p.nombre,
+        'referencia', COALESCE(NULLIF(btrim(k.detalle), ''), 'Salida #' || k.id_kardex),
+        'fechaSalida', k.fecha,
+        'cantidad', d.cantidad_utilizada,
+        'unidad', d.unidad_medida,
+        'costoUnitario', d.costo_unitario_aplicado,
+        'subtotal', d.subtotal
+      ) ORDER BY d.idcosto_insumo_detalle
+    )
+    FROM public.costo_insumo_detalle d
+    JOIN inventario.kardex k ON k.id_kardex = d.id_kardex
+    JOIN inventario.producto p ON p.id_producto = k.id_producto
+    WHERE d.idcosto = co.idcosto
+  ), '[]'::jsonb) AS "materiaPrimaDetalles"`;
+}
+
+async function assertManualMateriaPrimaNotUsed(
+  subcategoryId,
+  costId = null,
+  allowDetailedStateChange = false
+) {
   const migration = await pool.query(
     `SELECT EXISTS (
        SELECT 1
@@ -26,6 +57,23 @@ async function assertManualMateriaPrimaNotUsed(subcategoryId, costId = null) {
      ) AS applied`
   );
   if (!migration.rows[0].applied) return;
+
+  let materiaPrimaStateCondition = "cc.codigo_contable = '7105'";
+  if (allowDetailedStateChange) {
+    const detailTable = await pool.query(
+      `SELECT to_regclass('public.costo_insumo_detalle') IS NOT NULL AS available`
+    );
+    if (detailTable.rows[0]?.available) {
+      materiaPrimaStateCondition = `(
+        cc.codigo_contable = '7105'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM costo_insumo_detalle cid
+          WHERE cid.idcosto = co.idcosto
+        )
+      )`;
+    }
+  }
 
   const result = await pool.query(
     `SELECT EXISTS (
@@ -41,10 +89,7 @@ async function assertManualMateriaPrimaNotUsed(subcategoryId, costId = null) {
        LEFT JOIN categoria_costo cc ON cc.idcategoria = sc.idcategoria
        WHERE co.idcosto = $2
          AND (
-           cc.codigo_contable = '7105'
-           OR EXISTS (
-             SELECT 1 FROM costo_insumo ci WHERE ci.idcosto = co.idcosto
-           )
+           ${materiaPrimaStateCondition}
          )
      ) AS administrado_por_inventario`,
     [subcategoryId, costId]
@@ -205,12 +250,14 @@ export async function fetchFincasPorUsuario(idUsuario) {
 
 export async function fetchCultivoDetalleById(idcultivo) {
   try {
+    const detailProjection = await materiaPrimaDetailsProjection();
     const result = await pool.query(
       `SELECT
         co.idcosto AS id,
         co.fecha,
         co.descripcion,
         co.valor,
+        ${detailProjection},
         COALESCE(u.primer_nombre || ' ' || u.primer_apellido, '') AS usuario,
         sc.idsubcategoria AS "subcategoriaId",
         sc.nombre AS subcategoria,
@@ -240,12 +287,14 @@ export async function fetchCultivoDetalleById(idcultivo) {
 
 export async function fetchCostosPorFinca(idfinca) {
   try {
+    const detailProjection = await materiaPrimaDetailsProjection();
     const result = await pool.query(
       `SELECT
         co.idcosto AS id,
         co.fecha,
         co.descripcion,
         co.valor,
+        ${detailProjection},
         COALESCE(u.primer_nombre || ' ' || u.primer_apellido, '') AS usuario,
         sc.idsubcategoria AS "subcategoriaId",
         sc.nombre AS subcategoria,
@@ -1062,7 +1111,7 @@ export async function changeCultivoState(idcultivo, nuevoEstado) {
 }
 
 export async function changeCostoState(idcosto, nuevoEstado) {
-  await assertManualMateriaPrimaNotUsed(null, idcosto);
+  await assertManualMateriaPrimaNotUsed(null, idcosto, true);
   const result = await pool.query(
     `UPDATE costo
      SET estado_registro = $1

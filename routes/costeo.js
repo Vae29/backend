@@ -14,6 +14,7 @@ import {
   putUnitConversions,
   putCostSubcategoryConfig,
   getInventoryProducts,
+  getAvailableKardexOutputs,
   postInventoryConsumption,
   postLaborPayment,
   getLaborPayments,
@@ -38,6 +39,7 @@ router.get('/conversiones', getUnitConversions);
 router.put('/tipos-cultivo/:id/conversiones', auditContext('COSTEO'), putUnitConversions);
 router.put('/subcategorias/:id/configuracion', auditContext('COSTEO'), putCostSubcategoryConfig);
 router.get('/inventario/productos/:fincaId', getInventoryProducts);
+router.get('/inventario/salidas-disponibles/:fincaId/:cultivoId', getAvailableKardexOutputs);
 router.post('/inventario/consumos', auditContext('COSTOS'), postInventoryConsumption);
 router.get('/pagos-mano-obra', getLaborPayments);
 router.post('/pagos-mano-obra', auditContext('COSTOS'), postLaborPayment);

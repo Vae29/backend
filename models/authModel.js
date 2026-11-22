@@ -5,7 +5,18 @@ import { toDatabaseRegistroState } from '../utils/registroEstado.js';
 
 export async function findUserByCredentials(email, password) {
   const result = await pool.query(
-    'SELECT id_usuario AS id, correo AS email, primer_nombre AS nombre, primer_apellido AS apellidos, id_roles AS rol, "contraseña" AS password FROM usuario WHERE correo = $1 AND estado_registro = 1',
+    `SELECT u.id_usuario AS id, u.correo AS email, u.primer_nombre AS nombre,
+            u.primer_apellido AS apellidos, u.id_roles AS rol, u."contraseña" AS password
+       FROM usuario u
+      WHERE u.correo = $1
+        AND u.estado_registro = 1
+        AND EXISTS (
+          SELECT 1
+            FROM usuario_modulos um
+            JOIN modulos m ON m.id_modulo = um.id_modulo
+           WHERE um.id_usuario = u.id_usuario
+             AND m.nombre = 'costos'
+        )`,
     [email.toLowerCase().trim()]
   );
   const user = result.rows[0];
@@ -43,6 +54,13 @@ export async function fetchAllUsers(estado = 'ACTIVO') {
       COALESCE((SELECT array_agg(idcultivo) FROM usuario_cultivo uc WHERE uc.id_usuario = u.id_usuario), ARRAY[]::integer[]) AS cultivos
     FROM usuario u
     WHERE u.estado_registro = $1
+      AND EXISTS (
+        SELECT 1
+          FROM usuario_modulos um
+          JOIN modulos m ON m.id_modulo = um.id_modulo
+         WHERE um.id_usuario = u.id_usuario
+           AND m.nombre = 'costos'
+      )
     ORDER BY u.id_usuario`,
     [toDatabaseRegistroState(estado)]
   );

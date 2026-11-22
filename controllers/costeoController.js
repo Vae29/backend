@@ -1,5 +1,6 @@
 import * as costeoModel from '../models/costeoModel.js';
 import { parseCurrencyValue } from '../utils/currency.js';
+import { normalizeMateriaPrimaDetails } from '../utils/materiaPrimaDetails.js';
 
 function positiveInteger(value) {
   const parsed = Number(value);
@@ -262,46 +263,59 @@ export async function getInventoryProducts(req, res) {
   }
 }
 
+export async function getAvailableKardexOutputs(req, res) {
+  const fincaId = positiveInteger(req.params.fincaId);
+  const cultivoId = positiveInteger(req.params.cultivoId);
+  if (!fincaId || !cultivoId) {
+    return res.status(400).json({ success: false, message: 'Finca o cultivo inválido.' });
+  }
+  try {
+    const data = await costeoModel.getAvailableKardexOutputs(fincaId, cultivoId);
+    return res.json({ success: true, data });
+  } catch (error) {
+    return sendError(res, error, 'No se pudieron consultar las salidas disponibles de Kardex.');
+  }
+}
+
 export async function postInventoryConsumption(req, res) {
   const userId = positiveInteger(req.user?.id);
   const fincaId = positiveInteger(req.body?.fincaId);
   const cropId = positiveInteger(req.body?.cultivoId);
-  const etapaId = positiveInteger(req.body?.etapaId);
   const estadoPagoId = positiveInteger(req.body?.estadoPagoId);
   const subcategoryId = positiveInteger(req.body?.subcategoriaId);
-  const productoId = positiveInteger(req.body?.productoId);
-  const cantidad = Number(req.body?.cantidad);
-  const unidad = String(req.body?.unidad || '').trim();
   const fecha = req.body?.fecha || null;
+  const descripcion = String(req.body?.descripcion || '').trim();
+  let detalles;
+  try {
+    detalles = normalizeMateriaPrimaDetails(req.body?.detalles);
+  } catch (error) {
+    return res.status(error.statusCode || 400).json({ success: false, message: error.message });
+  }
   if (
-    !userId || !fincaId || !cropId || !etapaId || !estadoPagoId ||
-    !subcategoryId || !productoId || !Number.isFinite(cantidad) || cantidad <= 0 ||
-    Math.round(cantidad * 1000) !== cantidad * 1000 || !unidad ||
+    !userId || !fincaId || !cropId || !estadoPagoId ||
+    !subcategoryId || descripcion.length > 255 ||
     (fecha && !isValidISODate(fecha))
   ) {
-    return res.status(400).json({ success: false, message: 'Datos inválidos para registrar la salida de inventario.' });
+    return res.status(400).json({ success: false, message: 'Datos inválidos para registrar el costo de Materia Prima.' });
   }
   try {
     const data = await costeoModel.registerInventoryConsumption({
       userId,
       fincaId,
       cultivoId: cropId,
-      etapaId,
       estadoPagoId,
       subcategoriaId,
-      productoId,
-      cantidad,
-      unidad,
-      descripcion: String(req.body?.descripcion || '').trim() || null,
+      detalles,
+      descripcion: descripcion || null,
       fecha,
     });
     return res.status(201).json({ success: true, data: { costoId: data } });
   } catch (error) {
-    const invalidInputCodes = new Set(['22023', '23503', '23514', '23513', '22000', '22003', '28000']);
+    const invalidInputCodes = new Set(['22023', '23503', '23514', '23513', '23505', '22000', '22003', '28000']);
     return sendError(
       res,
       invalidInputCodes.has(error.code) ? Object.assign(error, { statusCode: 400 }) : error,
-      'No se pudo registrar la salida de inventario.'
+      'No se pudo registrar el costo de Materia Prima.'
     );
   }
 }

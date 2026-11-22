@@ -319,76 +319,69 @@ export async function getInventoryProducts(fincaId) {
   return result.rows;
 }
 
+export async function getAvailableKardexOutputs(fincaId, cultivoId) {
+  const result = await pool.query(
+    `SELECT k.id_kardex AS "idKardex",
+            p.nombre AS producto,
+            COALESCE(NULLIF(btrim(k.detalle), ''), 'Salida de Kardex') AS referencia,
+            k.fecha AS "fechaSalida",
+            pp.unidad_contenido AS unidad,
+            (k.cantidad * pp.contenido_por_envase)::numeric(18,6) AS "cantidadOriginal",
+            COALESCE(usado.cantidad_asociada, 0)::numeric(18,6) AS "cantidadAsociada",
+            GREATEST(
+              (k.cantidad * pp.contenido_por_envase)
+                - COALESCE(usado.cantidad_asociada, 0),
+              0
+            )::numeric(18,6) AS "cantidadDisponible",
+            round(k.costo_unitario / pp.contenido_por_envase, 6) AS "costoUnitario"
+     FROM inventario.kardex_destino_cultivo kd
+     JOIN inventario.kardex k ON k.id_kardex = kd.id_kardex
+     JOIN inventario.producto p ON p.id_producto = k.id_producto
+     JOIN inventario.presentacion_producto pp ON pp.id_producto = p.id_producto
+     JOIN cultivo c ON c.idcultivo = kd.idcultivo
+     LEFT JOIN LATERAL (
+       SELECT sum(d.cantidad_utilizada) AS cantidad_asociada
+       FROM public.costo_insumo_detalle d
+       WHERE d.id_kardex = k.id_kardex
+     ) usado ON TRUE
+     WHERE k.tipo = 'SALIDA'
+       AND k.id_finca = $1
+       AND c.idfinca = $1
+       AND c.idestadocultivo = 1
+       AND c.estado_registro = 1
+       AND kd.idcultivo = $2
+       AND (k.cantidad * pp.contenido_por_envase)
+             - COALESCE(usado.cantidad_asociada, 0) > 0
+     ORDER BY k.fecha DESC, k.id_kardex DESC`,
+    [fincaId, cultivoId]
+  );
+  return result.rows;
+}
+
 export async function registerInventoryConsumption({
   userId,
   fincaId,
   cultivoId,
-  etapaId,
   estadoPagoId,
   subcategoriaId,
-  productoId,
-  cantidad,
-  unidad,
+  detalles,
   descripcion,
   fecha,
 }) {
-  const subcategory = await pool.query(
-    `SELECT 1
-     FROM subcategoria_costo sc
-     JOIN categoria_costo cc ON cc.idcategoria = sc.idcategoria
-     WHERE sc.idsubcategoria = $1
-       AND cc.codigo_contable = '7105'`,
-    [subcategoriaId]
-  );
-  if (!subcategory.rowCount) {
-    throw Object.assign(new Error('La subcategoría seleccionada no pertenece a Materia Prima (7105).'), {
-      statusCode: 400,
-    });
-  }
-
-  const hasTypeStageMapping = await hasTypeStageMappingTable();
-  const typeStageCondition = hasTypeStageMapping
-    ? `AND (
-        NOT EXISTS (
-          SELECT 1 FROM etapas_tipo_cultivo configured
-          WHERE configured.idtipocultivo = c.idtipocultivo
-            AND configured.estado_registro = 1
-        )
-        OR EXISTS (
-          SELECT 1 FROM etapas_tipo_cultivo configured
-          WHERE configured.idtipocultivo = c.idtipocultivo
-            AND configured.idetapa = ec.idetapa
-            AND configured.estado_registro = 1
-        )
-      )`
-    : '';
-  const validStage = await pool.query(
-    `SELECT 1
-     FROM cultivo c
-     JOIN etapa_cultivo ec ON ec.idcultivo = c.idcultivo
-     JOIN etapas et ON et.idetapa = ec.idetapa
-     WHERE c.idcultivo = $1 AND c.idfinca = $2
-       AND c.estado_registro = 1
-       AND ec.idetapacultivo = $3
-       AND ec.idestadocultivo = 1 AND ec.estado_registro = 1
-       ${typeStageCondition}`,
-    [cultivoId, fincaId, etapaId]
-  );
-  if (!validStage.rowCount) {
-    throw Object.assign(new Error('La etapa no está activa o no corresponde al tipo de cultivo.'), {
-      statusCode: 400,
-    });
-  }
   const result = await pool.query(
-    `SELECT public.fn_registrar_costo_materia_prima(
+    `SELECT public.fn_registrar_costo_materia_prima_detallado(
        $1::integer, $2::integer, $3::integer, $4::integer,
-       $5::integer, $6::integer, $7::integer, $8::numeric,
-       $9::text, $10::text, $11::date
+       $5::integer, $6::text, $7::date, $8::jsonb
      ) AS "costoId"`,
     [
-      userId, fincaId, cultivoId, etapaId, estadoPagoId,
-      subcategoriaId, productoId, cantidad, unidad,
-      descripcion || null, fecha || null,
+      userId,
+      fincaId,
+      cultivoId,
+      estadoPagoId,
+      subcategoriaId,
+      descripcion || null,
+      fecha || null,
+      JSON.stringify(detalles),
     ]
   );
   return result.rows[0]?.costoId;
