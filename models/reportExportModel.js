@@ -1,5 +1,18 @@
 import pool from '../config/db.js';
 
+export const REPORT_FILTER_KEYS = [
+  'fincaId',
+  'cultivoId',
+  'categoriaId',
+  'subcategoriaId',
+  'usuarioId',
+  'estadoId',
+  'tipoCultivoId',
+  'etapaId',
+  'fechaInicio',
+  'fechaFin',
+];
+
 export async function getReportModelContext(fincaId, userId = null) {
   const result = await pool.query(
     `SELECT f.nombre AS finca,
@@ -53,6 +66,34 @@ export async function recordReportExport({
         tipoReporte: reportType,
         formato: format,
         filtros: filters,
+        numeroFilas: rowCount,
+      }),
+    ]
+  );
+  return result.rows[0].id;
+}
+
+export async function recordReportQuery({ reportType, filters, rowCount }) {
+  const safeFilters = Object.fromEntries(
+    REPORT_FILTER_KEYS
+      .filter((key) => filters && Object.prototype.hasOwnProperty.call(filters, key))
+      .map((key) => [key, filters[key]])
+      .filter(([, value]) => value == null || ['string', 'number', 'boolean'].includes(typeof value))
+  );
+  const result = await pool.query(
+    `SELECT public.fn_auditoria_registrar_evento(
+       'REPORTES'::text,
+       'CONSULTA_REPORTE'::text,
+       'reportes'::text,
+       NULL::bigint,
+       $1::text,
+       $2::jsonb
+     ) AS id`,
+    [
+      `Consulta del reporte ${reportType}; filas encontradas: ${rowCount}.`,
+      JSON.stringify({
+        tipoReporte: reportType,
+        filtros: safeFilters,
         numeroFilas: rowCount,
       }),
     ]

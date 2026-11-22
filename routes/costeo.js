@@ -19,12 +19,17 @@ import {
   postLaborPayment,
   getLaborPayments,
 } from '../controllers/costeoController.js';
+import { getCatalogos, postCatalogo, putCatalogo, deleteCatalogo } from '../controllers/catalogosController.js';
 import { verificarAccessToken, verificarAdmin } from '../middleware/auth.js';
 import { auditContext } from '../middleware/auditContext.js';
 
 const router = Router();
 router.use(verificarAccessToken, verificarAdmin);
 
+router.get('/catalogos', getCatalogos);
+router.post('/catalogos/:catalogo', auditContext('COSTEO'), postCatalogo);
+router.put('/catalogos/:catalogo/:id', auditContext('COSTEO'), putCatalogo);
+router.delete('/catalogos/:catalogo/:id', auditContext('COSTEO'), deleteCatalogo);
 router.get('/configuracion', getCostingConfiguration);
 router.post('/etapas', auditContext('COSTEO'), postStage);
 router.put('/etapas/:id', auditContext('COSTEO'), putStage);

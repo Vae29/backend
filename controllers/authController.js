@@ -1,6 +1,6 @@
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { randomInt } from 'crypto';
+import { randomBytes, randomInt } from 'crypto';
 import { sendResetCodeEmail } from '../utils/emailSender.js';
 import {
   findUserByCredentials,
@@ -11,6 +11,9 @@ import {
   deleteUser,
   changeUserState,
   createPasswordResetToken,
+  findActiveCostUserById,
+  invalidatePasswordResetToken,
+  recordAdminPasswordResetRequest,
   verifyPasswordResetCode,
   completePasswordReset,
 } from '../models/authModel.js';
@@ -56,7 +59,7 @@ export async function login(req, res) {
       });
     }
 
-    const usuario = await findUserByCredentials(email, password);
+    const usuario = await findUserByCredentials(email, password, req.ip || null);
 
     if (!usuario) {
       return res.status(401).json({
@@ -148,6 +151,55 @@ export async function requestPasswordReset(req, res) {
   }
 }
 
+export async function requestUserPasswordReset(req, res) {
+  let resetTokenId = null;
+  try {
+    const userId = Number(req.params.id);
+    const motivo = typeof req.body?.motivo === 'string' ? req.body.motivo.trim() : '';
+    if (!Number.isSafeInteger(userId) || userId <= 0) {
+      return res.status(400).json({ success: false, message: 'Identificador de usuario inválido.' });
+    }
+    if (motivo.length > 300) {
+      return res.status(400).json({ success: false, message: 'El motivo no puede superar 300 caracteres.' });
+    }
+
+    const usuario = await findActiveCostUserById(userId);
+    if (!usuario) {
+      return res.status(404).json({ success: false, message: 'No se encontró un usuario activo del módulo de Costos.' });
+    }
+
+    const code = generateResetCode();
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+    const resetToken = await createPasswordResetToken(usuario.id, code, expiresAt);
+    resetTokenId = resetToken.id;
+
+    await recordAdminPasswordResetRequest({
+      userId: usuario.id,
+      userName: usuario.nombre,
+      reason: motivo || 'El administrador solicitó el envío de un código de recuperación.',
+    });
+    await sendResetCodeEmail(usuario.email, code);
+
+    return res.json({
+      success: true,
+      message: 'Se envió un código al correo registrado. El usuario debe elegir su nueva contraseña desde “Olvidé mi contraseña”.',
+    });
+  } catch (error) {
+    if (resetTokenId) {
+      try {
+        await invalidatePasswordResetToken(resetTokenId);
+      } catch (cleanupError) {
+        console.error('Error invalidando código de recuperación no enviado:', cleanupError);
+      }
+    }
+    console.error('Error en requestUserPasswordReset:', error.stack || error);
+    return res.status(500).json({
+      success: false,
+      message: 'No se pudo enviar el código de recuperación. Inténtalo nuevamente o revisa la configuración del correo.',
+    });
+  }
+}
+
 export async function verifyResetCode(req, res) {
   try {
     const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : ''
@@ -225,12 +277,12 @@ export async function recoverPassword(req, res) {
 
 export async function createUserController(req, res) {
   try {
-    const { nombre, apellidos, correo, contraseña, rol, fincas = [], cultivos = [] } = req.body
+    const { nombre, apellidos, correo, rol, fincas = [], cultivos = [] } = req.body
 
-    if (!nombre || !apellidos || !correo || !contraseña || !rol) {
+    if (!nombre || !apellidos || !correo || !rol) {
       return res.status(400).json({
         success: false,
-        message: 'Todos los campos son requeridos',
+        message: 'Todos los campos son requeridos.',
       })
     }
 
@@ -254,7 +306,7 @@ export async function createUserController(req, res) {
       nombre: cleanNombre,
       apellidos: cleanApellidos,
       correo: cleanCorreo,
-      contraseña,
+      contraseña: await bcrypt.hash(randomBytes(32).toString('hex'), 12),
       rol,
       fincas,
       cultivos,
@@ -265,7 +317,6 @@ export async function createUserController(req, res) {
       nombre: nuevoUsuario.primer_nombre,
       apellidos: nuevoUsuario.primer_apellido,
       email: nuevoUsuario.email,
-      password: nuevoUsuario.password,
       rol: Number(nuevoUsuario.rol) === 1 ? 'Administrador' : 'Trabajador',
       fincas,
       cultivos,
@@ -288,9 +339,9 @@ export async function createUserController(req, res) {
 export async function updateUserController(req, res) {
   try {
     const { id } = req.params
-    const { nombre, apellidos, correo, contraseña, rol, fincas = [], cultivos = [] } = req.body
+    const { nombre, apellidos, correo, rol, fincas = [], cultivos = [] } = req.body
 
-    if (!nombre || !apellidos || !correo || !contraseña || !rol) {
+    if (!nombre || !apellidos || !correo || !rol) {
       return res.status(400).json({
         success: false,
         message: 'Todos los campos son requeridos',
@@ -317,7 +368,6 @@ export async function updateUserController(req, res) {
       nombre: cleanNombre,
       apellidos: cleanApellidos,
       correo: cleanCorreo,
-      contraseña,
       rol,
       fincas,
       cultivos,
@@ -335,7 +385,6 @@ export async function updateUserController(req, res) {
       nombre: updatedUser.primer_nombre,
       apellidos: updatedUser.primer_apellido,
       email: updatedUser.email,
-      password: updatedUser.password,
       rol: Number(updatedUser.rol) === 1 ? 'Administrador' : 'Trabajador',
       fincas,
       cultivos,
@@ -441,7 +490,6 @@ export async function getAllUsers(req, res) {
       nombre: usuario.primer_nombre,
       apellidos: usuario.primer_apellido,
       email: usuario.email,
-      password: usuario.password,
       rol: Number(usuario.rol) === 1 ? 'Administrador' : 'Trabajador',
       estado_registro: usuario.estado_registro,
       fincas: usuario.fincas || [],

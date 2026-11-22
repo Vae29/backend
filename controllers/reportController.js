@@ -1,5 +1,10 @@
 import * as reportModel from '../models/reportModel.js';
-import { getReportModelContext } from '../models/reportExportModel.js';
+import { getReportModelContext, recordReportQuery } from '../models/reportExportModel.js';
+
+async function recordReportQueryForAuthenticatedUser(req, reportType, filters, rowCount) {
+  if (!req.user?.id) return;
+  await recordReportQuery({ reportType, filters, rowCount });
+}
 
 // Controlador para devolver opciones de filtros dinámicos
 export async function getReportFilters(req, res) {
@@ -38,6 +43,7 @@ export async function postReportQuery(req, res) {
         ? await getReportModelContext(reportFilters.fincaId, req.user?.id || null)
         : {};
       const model = await reportModel.buildReportModel('costos', reportFilters, context);
+      await recordReportQueryForAuthenticatedUser(req, reportType, reportFilters, model.rows.length);
       return res.json({
         success: true,
         data: model.rows,
@@ -70,6 +76,7 @@ export async function postReportQuery(req, res) {
     const metadata = reportType === 'trabajador'
       ? { fuente: data[0]?.fuente || await reportModel.getWorkerReportSource() }
       : {};
+    await recordReportQueryForAuthenticatedUser(req, reportType, filters, data.length);
     return sendReportResponse(res, data, metadata);
   } catch (error) {
     console.error('Error en postReportQuery:', { body: req.body, error: error.stack || error });
@@ -81,6 +88,7 @@ export async function postReportPorCultivo(req, res) {
   try {
     const filters = req.body || {};
     const data = await reportModel.reportByCultivo(filters);
+    await recordReportQueryForAuthenticatedUser(req, 'por-cultivo', filters, data.length);
     return sendReportResponse(res, data);
   } catch (error) {
     console.error('Error en postReportPorCultivo:', { body: req.body, error: error.stack || error });
@@ -95,6 +103,7 @@ export async function postReportCostos(req, res) {
       ? await getReportModelContext(filters.fincaId, req.user?.id || null)
       : {};
     const model = await reportModel.buildReportModel('costos', filters, context);
+    await recordReportQueryForAuthenticatedUser(req, 'costos', filters, model.rows.length);
     return res.json({
       success: true,
       data: model.rows,
@@ -111,6 +120,7 @@ export async function postReportProduccion(req, res) {
   try {
     const filters = req.body || {};
     const data = await reportModel.reportProduccion(filters);
+    await recordReportQueryForAuthenticatedUser(req, 'produccion', filters, data.length);
     return sendReportResponse(res, data);
   } catch (error) {
     console.error('Error en postReportProduccion:', { body: req.body, error: error.stack || error });
@@ -122,6 +132,7 @@ export async function postReportRentabilidad(req, res) {
   try {
     const filters = req.body || {};
     const data = await reportModel.reportRentabilidad(filters);
+    await recordReportQueryForAuthenticatedUser(req, 'rentabilidad', filters, data.length);
     return sendReportResponse(res, data);
   } catch (error) {
     console.error('Error en postReportRentabilidad:', { body: req.body, error: error.stack || error });
@@ -134,6 +145,7 @@ export async function postReportTrabajador(req, res) {
     const filters = req.body || {};
     const data = await reportModel.reportByTrabajador(filters);
     const fuente = data[0]?.fuente || await reportModel.getWorkerReportSource();
+    await recordReportQueryForAuthenticatedUser(req, 'trabajador', filters, data.length);
     return sendReportResponse(res, data, { fuente });
   } catch (error) {
     console.error('Error en postReportTrabajador:', { body: req.body, error: error.stack || error });

@@ -3,7 +3,53 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { toDatabaseRegistroState } from '../utils/registroEstado.js';
 
-export async function findUserByCredentials(email, password) {
+async function migrateLegacyPasswordHash(userId, oldPassword, ipAddress) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `SELECT public.fn_auditoria_contexto(
+        $1::integer, $2::text, NULL, NULL, 'USUARIOS', $3::text
+      )`,
+      [userId, ipAddress, 'Conversión de credencial heredada a hash seguro']
+    );
+    const passwordHash = await bcrypt.hash(oldPassword, 12);
+    const updated = await client.query(
+      `UPDATE public.usuario
+       SET "contraseña" = $1
+       WHERE id_usuario = $2 AND "contraseña" = $3
+       RETURNING id_usuario`,
+      [passwordHash, userId, oldPassword]
+    );
+    if (!updated.rowCount) {
+      const current = await client.query(
+        `SELECT "contraseña" AS password
+         FROM public.usuario
+         WHERE id_usuario = $1
+         FOR UPDATE`,
+        [userId]
+      );
+      const currentHash = current.rows[0]?.password;
+      const stillValid = /^\$2[aby]\$/.test(currentHash || '')
+        && await bcrypt.compare(oldPassword, currentHash);
+      if (!stillValid) {
+        await client.query('ROLLBACK');
+        return false;
+      }
+    }
+    await client.query('COMMIT');
+    return true;
+  } catch (error) {
+    await client.query('ROLLBACK').catch((rollbackError) => {
+      console.error('Error revirtiendo la migración de contraseña heredada:', rollbackError);
+    });
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function findUserByCredentials(email, password, ipAddress = null) {
   const result = await pool.query(
     `SELECT u.id_usuario AS id, u.correo AS email, u.primer_nombre AS nombre,
             u.primer_apellido AS apellidos, u.id_roles AS rol, u."contraseña" AS password
@@ -22,11 +68,20 @@ export async function findUserByCredentials(email, password) {
   const user = result.rows[0];
   if (!user) return null;
 
-  const passwordMatches = /^\$2[aby]\$/.test(user.password)
+  const hasBcryptHash = /^\$2[aby]\$/.test(user.password);
+  const passwordMatches = hasBcryptHash
     ? await bcrypt.compare(password, user.password)
     : user.password === password;
 
   if (!passwordMatches) return null;
+  if (!hasBcryptHash) {
+    const migratedOrCurrentHashStillMatches = await migrateLegacyPasswordHash(
+      user.id,
+      user.password,
+      ipAddress
+    );
+    if (!migratedOrCurrentHashStillMatches) return null;
+  }
 
   delete user.password;
   return user;
@@ -48,7 +103,6 @@ export async function fetchAllUsers(estado = 'ACTIVO') {
       u.primer_nombre,
       u.primer_apellido,
       u.id_roles AS rol,
-      u."contraseña" AS password,
       CASE WHEN u.estado_registro = 1 THEN 'ACTIVO' ELSE 'DESACTIVADO' END AS estado_registro,
       COALESCE((SELECT array_agg(idfinca) FROM usuario_finca uf WHERE uf.id_usuario = u.id_usuario), ARRAY[]::integer[]) AS fincas,
       COALESCE((SELECT array_agg(idcultivo) FROM usuario_cultivo uc WHERE uc.id_usuario = u.id_usuario), ARRAY[]::integer[]) AS cultivos
@@ -73,7 +127,7 @@ export async function createUser({ nombre, apellidos, correo, contraseña, rol, 
     `INSERT INTO usuario (primer_nombre, primer_apellido, correo, "contraseña", id_roles, estado_registro)
      VALUES ($1, $2, $3, $4, $5, 1)
      RETURNING id_usuario AS id, correo AS email, primer_nombre, primer_apellido,
-               id_roles AS rol, "contraseña" AS password, 'ACTIVO'::text AS estado_registro`,
+               id_roles AS rol, 'ACTIVO'::text AS estado_registro`,
     [nombre, apellidos, correo, contraseña, roleId]
   )
   
@@ -98,16 +152,16 @@ export async function createUser({ nombre, apellidos, correo, contraseña, rol, 
   return result.rows[0]
 }
 
-export async function updateUser(id, { nombre, apellidos, correo, contraseña, rol, fincas = [], cultivos = [] }) {
+export async function updateUser(id, { nombre, apellidos, correo, rol, fincas = [], cultivos = [] }) {
   const roleId = rol === 'administrador' ? 1 : 2
   const result = await pool.query(
     `UPDATE usuario
-     SET primer_nombre = $1, primer_apellido = $2, correo = $3, "contraseña" = $4, id_roles = $5
-     WHERE id_usuario = $6
+     SET primer_nombre = $1, primer_apellido = $2, correo = $3, id_roles = $4
+     WHERE id_usuario = $5
      RETURNING id_usuario AS id, correo AS email, primer_nombre, primer_apellido,
-               id_roles AS rol, "contraseña" AS password,
+               id_roles AS rol,
                CASE WHEN estado_registro = 1 THEN 'ACTIVO' ELSE 'DESACTIVADO' END AS estado_registro`,
-    [nombre, apellidos, correo, contraseña, roleId, id]
+    [nombre, apellidos, correo, roleId, id]
   )
   
   // Actualizar fincas asignadas
@@ -185,6 +239,58 @@ export async function createPasswordResetToken(userId, code, expiresAt) {
   } finally {
     client.release();
   }
+}
+
+export async function findActiveCostUserById(userId) {
+  const result = await pool.query(
+    `SELECT u.id_usuario AS id, u.correo AS email,
+            concat_ws(' ', u.primer_nombre, u.primer_apellido) AS nombre
+     FROM public.usuario u
+     WHERE u.id_usuario = $1
+       AND u.estado_registro = 1
+       AND EXISTS (
+         SELECT 1
+         FROM public.usuario_modulos um
+         JOIN public.modulos m ON m.id_modulo = um.id_modulo
+         WHERE um.id_usuario = u.id_usuario AND m.nombre = 'costos'
+       )`,
+    [userId]
+  );
+  return result.rows[0] || null;
+}
+
+export async function invalidatePasswordResetToken(tokenId) {
+  const client = await pool.connect();
+  try {
+    await client.query(
+      'UPDATE password_reset_tokens SET used = true WHERE id = $1 AND used = false',
+      [tokenId]
+    );
+  } finally {
+    client.release();
+  }
+}
+
+export async function recordAdminPasswordResetRequest({ userId, userName, reason }) {
+  const result = await pool.query(
+    `SELECT public.fn_auditoria_registrar_evento(
+       'USUARIOS'::text,
+       'RESTABLECIMIENTO_SOLICITADO'::text,
+       'usuario'::text,
+       $1::bigint,
+       $2::text,
+       $3::jsonb
+     ) AS id`,
+    [
+      userId,
+      reason,
+      JSON.stringify({
+        usuarioObjetivo: userName,
+        medio: 'Código de recuperación enviado por correo',
+      }),
+    ]
+  );
+  return result.rows[0].id;
 }
 
 function hashResetCode(code) {
@@ -284,6 +390,13 @@ export async function completePasswordReset(email, code, passwordHash) {
       await client.query('ROLLBACK');
       return false;
     }
+
+    await client.query(
+      `UPDATE public.sesiones
+       SET activa = false, fecha_cierre = NOW()
+       WHERE id_usuario = $1 AND activa = true`,
+      [token.id_usuario]
+    );
 
     await client.query(
       'UPDATE password_reset_tokens SET used = true WHERE id = $1',

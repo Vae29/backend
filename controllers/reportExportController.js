@@ -8,18 +8,7 @@ import { generateReportExport } from '../services/reportExportService.js';
 
 const reportTypes = new Set(['por-cultivo', 'costos', 'produccion', 'rentabilidad', 'trabajador']);
 const formats = new Set(['xlsx', 'csv', 'pdf']);
-const filterKeys = [
-  'fincaId',
-  'cultivoId',
-  'categoriaId',
-  'subcategoriaId',
-  'usuarioId',
-  'estadoId',
-  'tipoCultivoId',
-  'etapaId',
-  'fechaInicio',
-  'fechaFin',
-];
+const filterKeys = reportExportModel.REPORT_FILTER_KEYS;
 const idKeys = [
   'fincaId',
   'cultivoId',

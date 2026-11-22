@@ -13,14 +13,23 @@ import { verificarAccessToken, verificarAdmin } from '../middleware/auth.js';
 import { auditContext } from '../middleware/auditContext.js';
 
 const router = Router();
+const auditReportQuery = auditContext('REPORTES');
+const authenticateIfProvided = (req, res, next) => {
+  if (!req.headers.authorization) return next();
+  return verificarAccessToken(req, res, next);
+};
+const auditIfAuthenticated = (req, res, next) => {
+  if (!req.user) return next();
+  return auditReportQuery(req, res, next);
+};
 
 router.get('/filters', getReportFilters);
-router.post('/query', postReportQuery);
-router.post('/por-cultivo', postReportPorCultivo);
-router.post('/costos', postReportCostos);
-router.post('/produccion', postReportProduccion);
-router.post('/rentabilidad', postReportRentabilidad);
-router.post('/trabajador', postReportTrabajador);
+router.post('/query', authenticateIfProvided, auditIfAuthenticated, postReportQuery);
+router.post('/por-cultivo', authenticateIfProvided, auditIfAuthenticated, postReportPorCultivo);
+router.post('/costos', authenticateIfProvided, auditIfAuthenticated, postReportCostos);
+router.post('/produccion', authenticateIfProvided, auditIfAuthenticated, postReportProduccion);
+router.post('/rentabilidad', authenticateIfProvided, auditIfAuthenticated, postReportRentabilidad);
+router.post('/trabajador', authenticateIfProvided, auditIfAuthenticated, postReportTrabajador);
 router.get('/export', (req, res) => {
   res.setHeader('Allow', 'POST');
   return res.status(405).json({

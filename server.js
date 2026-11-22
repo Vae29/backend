@@ -9,6 +9,7 @@ import authRoutes from './routes/auth.js';
 import asignacionesUsuarioRoutes from './routes/asignaciones-usuario.js';
 import dashboardRoutes from './routes/dashboard.js';
 import reportesRoutes from './routes/reportes.js';
+import auditoriaRoutes from './routes/auditoria.js';
 import costeoRoutes from './routes/costeo.js';
 import fincasRoutes from './routes/fincas.js';
 
@@ -60,6 +61,7 @@ app.use('/api/fincas', fincasRoutes);
 app.use('/api', asignacionesUsuarioRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/reportes', reportesRoutes);
+app.use('/api/auditoria', auditoriaRoutes);
 app.use('/reportes', reportesRoutes);
 app.use('/api/costeo', costeoRoutes);
 
