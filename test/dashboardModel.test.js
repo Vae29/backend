@@ -1,6 +1,27 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildCostTrendQuery, buildProductionTrendQuery } from '../models/dashboardModel.js';
+import pool from '../config/db.js';
+import {
+  buildCostTrendQuery,
+  buildProductionTrendQuery,
+  findDashboardByFinca,
+} from '../models/dashboardModel.js';
+
+test('dashboard identifies finalized status names without depending on casing or spacing', async (t) => {
+  const queries = [];
+  t.mock.method(pool, 'query', async (query) => {
+    queries.push(query);
+    return { rows: [] };
+  });
+
+  await findDashboardByFinca(1);
+
+  assert.match(queries[0], /LOWER\(BTRIM\(e\.nombre\)\)/);
+  assert.match(queries[0], /cultivos\.estado = 'finalizado'/);
+  assert.match(queries[1], /LOWER\(BTRIM\(e\.nombre\)\)/);
+  assert.match(queries[6], /LOWER\(BTRIM\(e\.nombre\)\)/);
+  assert.match(queries[6], /<> 'finalizado'/);
+});
 
 test('production trend restricts active harvests to active crops in the selected farm', () => {
   const query = buildProductionTrendQuery();

@@ -47,6 +47,7 @@ export const AUDIT_ENTITIES = [
   'reportes',
 ];
 
+const CROP_ID_FIELDS = ['idcultivo', 'cultivoId'];
 const COST_MODULES = AUDIT_MODULES.filter((module) => module !== 'REPORTES');
 const COST_ENTITIES = AUDIT_ENTITIES.filter((entity) => entity !== 'reportes');
 const AUDIT_SCOPE = `(
@@ -112,7 +113,9 @@ export async function listAuditEvents(filters) {
                      ELSE 'Usuario #' || a.usuario_id::text END
               ) AS usuario,
               a.modulo, a.accion, a.tabla_afectada AS entidad,
-              a.registro_id AS "registroId", a.descripcion
+              a.registro_id AS "registroId", a.descripcion,
+              a.valores_anteriores AS "valoresAnteriores",
+              a.valores_nuevos AS "valoresNuevos"
        FROM public.auditoria a
        LEFT JOIN public.usuario u ON u.id_usuario = a.usuario_id
        WHERE ${where}
@@ -137,9 +140,16 @@ export async function listAuditEvents(filters) {
     ),
   ]);
 
+  const cropNames = await getAuditCropNames(eventsResult.rows);
+  const eventos = eventsResult.rows.map((event) => {
+    event.cultivo = getAuditCropName(event, cropNames);
+    delete event.valoresAnteriores;
+    delete event.valoresNuevos;
+    return event;
+  });
   const total = countResult.rows[0]?.total || 0;
   return {
-    eventos: eventsResult.rows,
+    eventos,
     total,
     page: filters.page,
     pageSize: filters.pageSize,
@@ -166,6 +176,38 @@ function collectIds(snapshots, keys) {
     }
   }
   return [...ids];
+}
+
+function getAuditCropId(event) {
+  if (event.entidad === 'cultivo') {
+    const cropId = Number(event.registroId);
+    return Number.isInteger(cropId) && cropId > 0 ? cropId : null;
+  }
+  return collectIds([event.valoresNuevos, event.valoresAnteriores], CROP_ID_FIELDS)[0] || null;
+}
+
+function getAuditCropName(event, cropNames, related = null) {
+  const snapshotName = event.entidad === 'cultivo'
+    ? event.valoresNuevos?.nombre || event.valoresAnteriores?.nombre
+    : null;
+  const cropId = getAuditCropId(event);
+  return snapshotName
+    || related?.cultivos?.[String(cropId)]
+    || cropNames.get(String(cropId))
+    || null;
+}
+
+async function getAuditCropNames(events) {
+  const ids = [...new Set(events.map(getAuditCropId).filter(Boolean))];
+  if (ids.length === 0) return new Map();
+
+  const result = await pool.query(
+    `SELECT idcultivo AS id, nombre
+     FROM public.cultivo
+     WHERE idcultivo = ANY($1::integer[])`,
+    [ids]
+  );
+  return new Map(result.rows.map((crop) => [String(crop.id), crop.nombre]));
 }
 
 async function getRelatedLabels(snapshots) {
@@ -270,9 +312,14 @@ export async function getAuditEvent(id) {
   const event = result.rows[0];
   if (!event) return null;
 
-  event.relacionados = await getRelatedLabels([
+  const relatedSnapshots = [
     event.valoresAnteriores,
     event.valoresNuevos,
+    ...(event.entidad === 'cultivo' ? [{ idcultivo: event.registroId }] : []),
+  ];
+  event.relacionados = await getRelatedLabels([
+    ...relatedSnapshots,
   ]);
+  event.cultivo = getAuditCropName(event, new Map(), event.relacionados);
   return event;
 }

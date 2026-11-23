@@ -105,7 +105,14 @@ export async function fetchAllUsers(estado = 'ACTIVO') {
       u.id_roles AS rol,
       CASE WHEN u.estado_registro = 1 THEN 'ACTIVO' ELSE 'DESACTIVADO' END AS estado_registro,
       COALESCE((SELECT array_agg(idfinca) FROM usuario_finca uf WHERE uf.id_usuario = u.id_usuario), ARRAY[]::integer[]) AS fincas,
-      COALESCE((SELECT array_agg(idcultivo) FROM usuario_cultivo uc WHERE uc.id_usuario = u.id_usuario), ARRAY[]::integer[]) AS cultivos
+      COALESCE((SELECT array_agg(idcultivo) FROM usuario_cultivo uc WHERE uc.id_usuario = u.id_usuario), ARRAY[]::integer[]) AS cultivos,
+      COALESCE((
+        SELECT array_agg(m.nombre ORDER BY m.nombre)
+        FROM usuario_modulos um
+        JOIN modulos m ON m.id_modulo = um.id_modulo
+        WHERE um.id_usuario = u.id_usuario
+          AND m.nombre IN ('costos', 'inventario')
+      ), ARRAY[]::varchar[]) AS modulos
     FROM usuario u
     WHERE u.estado_registro = $1
       AND EXISTS (
@@ -113,7 +120,7 @@ export async function fetchAllUsers(estado = 'ACTIVO') {
           FROM usuario_modulos um
           JOIN modulos m ON m.id_modulo = um.id_modulo
          WHERE um.id_usuario = u.id_usuario
-           AND m.nombre = 'costos'
+           AND m.nombre IN ('costos', 'inventario')
       )
     ORDER BY u.id_usuario`,
     [toDatabaseRegistroState(estado)]
@@ -121,7 +128,16 @@ export async function fetchAllUsers(estado = 'ACTIVO') {
   return result.rows;
 }
 
-export async function createUser({ nombre, apellidos, correo, contraseña, rol, fincas = [], cultivos = [] }) {
+export async function createUser({
+  nombre,
+  apellidos,
+  correo,
+  contraseña,
+  rol,
+  fincas = [],
+  cultivos = [],
+  modulos = ['costos'],
+}) {
   const roleId = rol === 'administrador' ? 1 : 2
   const result = await pool.query(
     `INSERT INTO usuario (primer_nombre, primer_apellido, correo, "contraseña", id_roles, estado_registro)
@@ -132,6 +148,18 @@ export async function createUser({ nombre, apellidos, correo, contraseña, rol, 
   )
   
   const userId = result.rows[0].id;
+
+  const moduleAssignments = await pool.query(
+    `INSERT INTO usuario_modulos (id_usuario, id_modulo)
+     SELECT $1, m.id_modulo
+     FROM modulos m
+     WHERE m.nombre = ANY($2::text[])
+     RETURNING id_modulo`,
+    [userId, modulos]
+  )
+  if (moduleAssignments.rows.length !== modulos.length) {
+    throw new Error('No se pudieron asignar todos los módulos solicitados al usuario.')
+  }
   
   // Asignar fincas si existen
   if (fincas && fincas.length > 0) {
@@ -149,7 +177,7 @@ export async function createUser({ nombre, apellidos, correo, contraseña, rol, 
     await pool.query(cultivosQuery, cultivosParams);
   }
   
-  return result.rows[0]
+  return { ...result.rows[0], modulos }
 }
 
 export async function updateUser(id, { nombre, apellidos, correo, rol, fincas = [], cultivos = [] }) {

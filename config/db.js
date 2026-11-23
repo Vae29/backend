@@ -11,7 +11,8 @@ dotenv.config({ path: envPath });
 const { Pool } = pkg;
 const requestDatabaseContext = new AsyncLocalStorage();
 
-const ssl = process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false;
+const sslEnabled = process.env.DB_SSL === 'true' || process.env.NODE_ENV === 'production';
+const ssl = sslEnabled ? { rejectUnauthorized: false } : false;
 
 const usingDatabaseUrl = Boolean(process.env.DATABASE_URL);
 const usingPgVars = Boolean(

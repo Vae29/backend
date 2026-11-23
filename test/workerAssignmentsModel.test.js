@@ -2,13 +2,90 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import pool from '../config/db.js'
 import {
+  createCultivo,
+  createEtapaParaCultivo,
   createCosecha,
   fetchCosechasPorCultivo,
+  fetchCultivosEnProceso,
   fetchAllEtapasCatalog,
   FINCAS_POR_USUARIO_QUERY,
   validateActiveEtapaForCultivo,
   validateEtapaAllowedForCultivo,
 } from '../models/asinaciones-usuarioModel.js'
+
+test('active crop query returns the status name used by the farms count', async () => {
+  const originalQuery = pool.query
+  let capturedQuery = ''
+  pool.query = async (query) => {
+    capturedQuery = query
+    return { rows: [{ id: 8, idfinca: 2, estado: 'En Proceso' }] }
+  }
+
+  try {
+    const cultivos = await fetchCultivosEnProceso()
+    assert.equal(cultivos[0].estado, 'En Proceso')
+    assert.match(capturedQuery, /estado\.nombre AS estado/)
+    assert.match(capturedQuery, /lower\(btrim\(estado\.nombre\)\) = 'en proceso'/)
+  } finally {
+    pool.query = originalQuery
+  }
+})
+
+test('new crops use the database ID for the En Proceso status', async () => {
+  const originalQuery = pool.query
+  const queries = []
+  pool.query = async (query, params) => {
+    queries.push({ query, params })
+    if (query.includes('FROM estado_cultivo')) {
+      return { rows: [{ idestadocultivo: 23 }] }
+    }
+    return {
+      rows: [{ id: 8, nombre: 'Nuevo cultivo', idfinca: 2, idtipocultivo: 4, idestado: 23 }],
+    }
+  }
+
+  try {
+    const cultivo = await createCultivo({
+      nombre: 'Nuevo cultivo',
+      idtipocultivo: 4,
+      idfinca: 2,
+    })
+
+    assert.equal(cultivo.idestado, 23)
+    assert.match(queries[0].query, /lower\(btrim\(nombre\)\) = lower\(btrim\(\$1\)\)/)
+    assert.deepEqual(queries[1].params, ['Nuevo cultivo', 4, 2, 23])
+  } finally {
+    pool.query = originalQuery
+  }
+})
+
+test('new crop stages use the database ID for the En Proceso status', async () => {
+  const originalQuery = pool.query
+  const queries = []
+  pool.query = async (query, params) => {
+    queries.push({ query, params })
+    if (query.includes('FROM estado_cultivo')) {
+      return { rows: [{ idestadocultivo: 23 }] }
+    }
+    return {
+      rows: [{ id: 9, idetapa: 4, descripcion: null, idestado: 23 }],
+    }
+  }
+
+  try {
+    const etapa = await createEtapaParaCultivo({
+      idcultivo: 8,
+      idetapa: 4,
+      descripcion: '',
+    })
+
+    assert.equal(etapa.idestado, 23)
+    assert.match(queries[0].query, /lower\(btrim\(nombre\)\) = lower\(btrim\(\$1\)\)/)
+    assert.deepEqual(queries[1].params, [4, 8, null, 23])
+  } finally {
+    pool.query = originalQuery
+  }
+})
 
 test('worker farm query includes directly assigned farms', () => {
   assert.match(FINCAS_POR_USUARIO_QUERY, /FROM usuario_finca uf[\s\S]*uf\.idfinca = f\.idfinca[\s\S]*uf\.id_usuario = \$1/)

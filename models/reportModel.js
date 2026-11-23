@@ -166,7 +166,7 @@ function buildFilteredCrops(
     where.push(`cu.idestadocultivo = $${params.length}`);
   } else if (filters.estado) {
     params.push(String(filters.estado));
-    where.push(`LOWER(e.nombre) = LOWER($${params.length})`);
+    where.push(`LOWER(BTRIM(e.nombre)) = LOWER(BTRIM($${params.length}))`);
   }
 
   const baseUnitSelection = includeBaseUnit && hasUnitConversions

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import bcrypt from 'bcryptjs';
 import pool from '../config/db.js';
-import { fetchAllUsers, findUserByCredentials } from '../models/authModel.js';
+import { createUser, fetchAllUsers, findUserByCredentials } from '../models/authModel.js';
 
 test('login lookup only returns users assigned to the costos module', async () => {
   const originalQuery = pool.query;
@@ -72,7 +72,7 @@ test('a valid legacy plaintext password is migrated to bcrypt with an audit cont
   }
 });
 
-test('user listing only returns users assigned to the costos module', async () => {
+test('user listing includes users assigned to either supported module', async () => {
   const originalQuery = pool.query;
   const queries = [];
   pool.query = async (query, params) => {
@@ -86,9 +86,37 @@ test('user listing only returns users assigned to the costos module', async () =
     assert.match(queries[0].query, /usuario_modulos um/);
     assert.match(queries[0].query, /JOIN modulos m ON m\.id_modulo = um\.id_modulo/);
     assert.match(queries[0].query, /um\.id_usuario = u\.id_usuario/);
-    assert.match(queries[0].query, /m\.nombre = 'costos'/);
+    assert.match(queries[0].query, /m\.nombre IN \('costos', 'inventario'\)/);
+    assert.match(queries[0].query, /array_agg\(m\.nombre ORDER BY m\.nombre\)/);
     assert.doesNotMatch(queries[0].query, /contraseña|password/i);
   } finally {
     pool.query = originalQuery;
   }
+});
+
+test('createUser persists the selected module memberships', async (t) => {
+  const queries = [];
+  t.mock.method(pool, 'query', async (query, params) => {
+    queries.push({ query, params });
+    if (/INSERT INTO usuario \(/.test(query)) {
+      return { rows: [{ id: 8, email: 'nueva@example.com' }] };
+    }
+    if (/INSERT INTO usuario_modulos/.test(query)) {
+      return { rows: [{ id_modulo: 1 }, { id_modulo: 2 }] };
+    }
+    return { rows: [] };
+  });
+
+  const user = await createUser({
+    nombre: 'Nueva',
+    apellidos: 'Cuenta',
+    correo: 'nueva@example.com',
+    contraseña: 'hashed',
+    rol: 'trabajador',
+    modulos: ['costos', 'inventario'],
+  });
+
+  const moduleInsert = queries.find(({ query }) => /INSERT INTO usuario_modulos/.test(query));
+  assert.deepEqual(moduleInsert.params, [8, ['costos', 'inventario']]);
+  assert.deepEqual(user.modulos, ['costos', 'inventario']);
 });

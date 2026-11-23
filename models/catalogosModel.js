@@ -96,7 +96,7 @@ async function assertCultivationStatusEditable(key, id) {
     [id]
   );
   const name = result.rows[0]?.nombre?.trim().toLowerCase() || '';
-  if (result.rows[0] && (Number(result.rows[0].idestadocultivo) === 1 || name.startsWith('finaliz'))) {
+  if (result.rows[0] && (name === 'en proceso' || name === 'finalizado')) {
     throw modelError('Los estados En Proceso y Finalizado son necesarios para el flujo de cultivos y no se pueden renombrar ni eliminar.', 409);
   }
 }

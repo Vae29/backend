@@ -23,6 +23,26 @@ function sendError(res, error, fallback) {
   });
 }
 
+function sendLifecycleConflict(res, error, fallback) {
+  if (
+    error?.code !== '23514' ||
+    !error.message?.startsWith('No se permiten nuevos registros')
+  ) return false
+  error.statusCode = 409
+  sendError(res, error, fallback)
+  return true
+}
+
+async function canAccessInventoryCrop(user, fincaId, cultivoId) {
+  const role = String(user?.role || '').trim().toLowerCase();
+  if (['admin', 'administrador', '1'].includes(role)) return true;
+  if (!['worker', 'trabajador', '2'].includes(role)) return false;
+  const userId = positiveInteger(user?.id);
+  return userId
+    ? costeoModel.userHasAssignedCultivo(userId, fincaId, cultivoId)
+    : false;
+}
+
 export async function getCostingConfiguration(req, res) {
   try {
     const data = await costeoModel.getCostingConfiguration();
@@ -177,6 +197,7 @@ export async function putGeneralCostAllocations(req, res) {
     await costeoModel.replaceGeneralCostAllocations(fincaId, normalized);
     return res.json({ success: true, data: normalized });
   } catch (error) {
+    if (sendLifecycleConflict(res, error, 'No se pudo guardar el prorrateo de costos generales.')) return
     return sendError(res, error, 'No se pudo guardar el prorrateo de costos generales.');
   }
 }
@@ -270,6 +291,12 @@ export async function getAvailableKardexOutputs(req, res) {
     return res.status(400).json({ success: false, message: 'Finca o cultivo inválido.' });
   }
   try {
+    if (!await canAccessInventoryCrop(req.user, fincaId, cultivoId)) {
+      return res.status(403).json({
+        success: false,
+        message: 'No tienes permiso para consultar inventario de este cultivo.',
+      });
+    }
     const data = await costeoModel.getAvailableKardexOutputs(fincaId, cultivoId);
     return res.json({ success: true, data });
   } catch (error) {
@@ -299,12 +326,18 @@ export async function postInventoryConsumption(req, res) {
     return res.status(400).json({ success: false, message: 'Datos inválidos para registrar el costo de Materia Prima.' });
   }
   try {
+    if (!await canAccessInventoryCrop(req.user, fincaId, cropId)) {
+      return res.status(403).json({
+        success: false,
+        message: 'No tienes permiso para registrar consumos en este cultivo.',
+      });
+    }
     const data = await costeoModel.registerInventoryConsumption({
       userId,
       fincaId,
       cultivoId: cropId,
       estadoPagoId,
-      subcategoriaId,
+      subcategoriaId: subcategoryId,
       detalles,
       descripcion: descripcion || null,
       fecha,
@@ -352,6 +385,7 @@ export async function postLaborPayment(req, res) {
     });
     return res.status(201).json({ success: true, data });
   } catch (error) {
+    if (sendLifecycleConflict(res, error, 'No se pudo registrar el pago de mano de obra.')) return
     return sendError(res, error, 'No se pudo registrar el pago de mano de obra.');
   }
 }

@@ -24,7 +24,12 @@ import { verificarAccessToken, verificarAdmin } from '../middleware/auth.js';
 import { auditContext } from '../middleware/auditContext.js';
 
 const router = Router();
-router.use(verificarAccessToken, verificarAdmin);
+router.use(verificarAccessToken);
+
+router.get('/inventario/salidas-disponibles/:fincaId/:cultivoId', getAvailableKardexOutputs);
+router.post('/inventario/consumos', auditContext('COSTOS'), postInventoryConsumption);
+
+router.use(verificarAdmin);
 
 router.get('/catalogos', getCatalogos);
 router.post('/catalogos/:catalogo', auditContext('COSTEO'), postCatalogo);
@@ -44,8 +49,6 @@ router.get('/conversiones', getUnitConversions);
 router.put('/tipos-cultivo/:id/conversiones', auditContext('COSTEO'), putUnitConversions);
 router.put('/subcategorias/:id/configuracion', auditContext('COSTEO'), putCostSubcategoryConfig);
 router.get('/inventario/productos/:fincaId', getInventoryProducts);
-router.get('/inventario/salidas-disponibles/:fincaId/:cultivoId', getAvailableKardexOutputs);
-router.post('/inventario/consumos', auditContext('COSTOS'), postInventoryConsumption);
 router.get('/pagos-mano-obra', getLaborPayments);
 router.post('/pagos-mano-obra', auditContext('COSTOS'), postLaborPayment);
 

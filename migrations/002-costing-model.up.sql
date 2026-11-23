@@ -1,7 +1,52 @@
 BEGIN;
 
+DO $$
+DECLARE
+  v_audit_context regprocedure :=
+    pg_catalog.to_regprocedure(
+      'public.fn_auditoria_contexto(integer,text,text,uuid,text,text)'
+    );
+  v_usuario_id integer;
+BEGIN
+  IF v_audit_context IS NOT NULL THEN
+    SELECT id_usuario
+      INTO v_usuario_id
+      FROM public.usuario
+     WHERE email = 'admin@prueba.com'
+     ORDER BY id_usuario
+     LIMIT 1;
+
+    IF v_usuario_id IS NULL THEN
+      RAISE EXCEPTION
+        'La auditoría está activa, pero no se encontró el usuario administrador para registrar la migración.';
+    END IF;
+
+    EXECUTE
+      'SELECT public.fn_auditoria_contexto($1, NULL, NULL, NULL, $2, $3)'
+      USING v_usuario_id, 'COSTEO', 'Aplicación de la migración de modelo de costeo 002';
+  END IF;
+END
+$$;
+
+DROP TRIGGER IF EXISTS trg_validar_total_costo_insumo_detalle ON public.costo;
+
 ALTER TABLE public.costo
   ALTER COLUMN valor TYPE NUMERIC(14,2);
+
+DO $$
+BEGIN
+  IF pg_catalog.to_regclass('public.costo_insumo_detalle') IS NOT NULL
+     AND pg_catalog.to_regprocedure(
+       'public.fn_validar_total_costo_insumo_detalle()'
+     ) IS NOT NULL THEN
+    EXECUTE
+      'CREATE TRIGGER trg_validar_total_costo_insumo_detalle '
+      || 'BEFORE UPDATE OF valor ON public.costo '
+      || 'FOR EACH ROW WHEN (OLD.valor IS DISTINCT FROM NEW.valor) '
+      || 'EXECUTE FUNCTION public.fn_validar_total_costo_insumo_detalle()';
+  END IF;
+END
+$$;
 
 ALTER TABLE public.cosecha
   ALTER COLUMN cantidad_cosechada TYPE NUMERIC(14,3),

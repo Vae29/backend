@@ -277,7 +277,7 @@ export async function recoverPassword(req, res) {
 
 export async function createUserController(req, res) {
   try {
-    const { nombre, apellidos, correo, rol, fincas = [], cultivos = [] } = req.body
+    const { nombre, apellidos, correo, rol, fincas = [], cultivos = [], modulos } = req.body
 
     if (!nombre || !apellidos || !correo || !rol) {
       return res.status(400).json({
@@ -285,6 +285,20 @@ export async function createUserController(req, res) {
         message: 'Todos los campos son requeridos.',
       })
     }
+
+    const modulosSeleccionados = modulos === undefined ? ['costos'] : modulos
+    const modulosPermitidos = new Set(['costos', 'inventario'])
+    if (
+      !Array.isArray(modulosSeleccionados) ||
+      modulosSeleccionados.length === 0 ||
+      modulosSeleccionados.some((modulo) => !modulosPermitidos.has(modulo))
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'Selecciona al menos un módulo válido: Costos o Inventario.',
+      })
+    }
+    const modulosUnicos = [...new Set(modulosSeleccionados)]
 
     const cleanNombre = nombre
       .trim()
@@ -310,6 +324,7 @@ export async function createUserController(req, res) {
       rol,
       fincas,
       cultivos,
+      modulos: modulosUnicos,
     })
 
     const userResponse = {
@@ -320,6 +335,7 @@ export async function createUserController(req, res) {
       rol: Number(nuevoUsuario.rol) === 1 ? 'Administrador' : 'Trabajador',
       fincas,
       cultivos,
+      modulos: nuevoUsuario.modulos,
     }
 
     res.status(201).json({
@@ -494,6 +510,7 @@ export async function getAllUsers(req, res) {
       estado_registro: usuario.estado_registro,
       fincas: usuario.fincas || [],
       cultivos: usuario.cultivos || [],
+      modulos: usuario.modulos || [],
     }));
 
     res.json({

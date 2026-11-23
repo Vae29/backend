@@ -1,6 +1,23 @@
 import { fetchAllFincas, fetchCultivosEnProceso, fetchCultivosPorFinca, fetchCultivoDetalleById, fetchCostosPorFinca, fetchCategoriasCosto, fetchSubcategoriasPorCategoria, fetchEstadosPago, fetchEtapaEnProcesoPorCultivo, validateCultivoCanAddCosto, validateActiveEtapaForCultivo, createCosto, updateCosto, deleteCostoById, fetchTiposCultivo, fetchEstados, fetchEstadoById, createCultivo, updateCultivo, fetchCultivosPorUsuario, fetchFincasPorUsuario, deleteOrDeactivateEtapaById, deleteCultivoById, changeCultivoState, changeCostoState, changeEtapaState, changeCosechaState, fetchEtapasPorCultivo, fetchAllEtapasCatalog, validateEtapaAllowedForCultivo, validateEtapaAllowedForEtapaCultivo, finalizeEtapaEnProceso, createEtapaParaCultivo, updateEtapaParaCultivo, fetchCosechasPorCultivo, fetchUnidadesMedida, fetchTiposPrecio, validateCultivoCanAddCosecha, createCosecha, updateCosecha, deleteCosechaById } from '../models/asinaciones-usuarioModel.js';
 import { parseCurrencyValue, parseQuantityValue } from '../utils/currency.js'
 
+function sendLifecycleConflict(error, res) {
+  const lifecycleMessages = [
+    'No se permiten nuevos registros',
+    'No se puede reactivar una etapa',
+    'Se requiere exactamente un estado En Proceso',
+  ]
+  if (
+    error?.code !== '23514' ||
+    !lifecycleMessages.some((message) => error.message?.startsWith(message))
+  ) return false
+  res.status(409).json({
+    success: false,
+    message: error.message || 'El estado del cultivo no permite esta operación.',
+  })
+  return true
+}
+
 export async function getFincas(req, res) {
   try {
     const fincas = await fetchAllFincas();
@@ -358,6 +375,7 @@ export async function postCosecha(req, res) {
     res.status(201).json({ success: true, data: cosecha })
   } catch (error) {
     console.error('Error en postCosecha:', error)
+    if (sendLifecycleConflict(error, res)) return
     res.status(500).json({ success: false, message: 'Error al crear la cosecha' })
   }
 }
@@ -488,6 +506,7 @@ export async function postEtapaPorCultivo(req, res) {
     res.status(201).json({ success: true, data: { finalized, created } })
   } catch (error) {
     console.error('Error en postEtapaPorCultivo:', error)
+    if (sendLifecycleConflict(error, res)) return
     res.status(500).json({ success: false, message: 'Error al crear etapa para cultivo' })
   }
 }
@@ -529,6 +548,7 @@ export async function putEtapaPorCultivo(req, res) {
     res.json({ success: true, data: updated })
   } catch (error) {
     console.error('Error en putEtapaPorCultivo:', error)
+    if (sendLifecycleConflict(error, res)) return
     res.status(500).json({ success: false, message: 'Error al actualizar etapa del cultivo' })
   }
 }
@@ -655,6 +675,7 @@ export async function postCosto(req, res) {
     })
   } catch (error) {
     console.error('Error en postCosto:', error)
+    if (sendLifecycleConflict(error, res)) return
     if (error?.statusCode) {
       return res.status(error.statusCode).json({ success: false, message: error.message })
     }
@@ -765,7 +786,7 @@ export async function putCultivo(req, res) {
 
     // Determinar si el nuevo estado es 'Finalizado'
     const estadoNombre = await fetchEstadoById(Number(idestado));
-    const estadoLower = typeof estadoNombre === 'string' ? estadoNombre.toLowerCase() : '';
+    const estadoLower = typeof estadoNombre === 'string' ? estadoNombre.trim().toLowerCase() : '';
     // Si el estado es finalizado, perdido o suspendido, establecer fecha_final a la fecha actual
     const fecha_final = ['finalizado', 'perdido', 'suspendido'].includes(estadoLower) ? new Date() : null;
 
@@ -780,6 +801,7 @@ export async function putCultivo(req, res) {
     res.json({ success: true, data: updated });
   } catch (error) {
     console.error('Error en putCultivo:', error);
+    if (sendLifecycleConflict(error, res)) return
     res.status(500).json({ success: false, message: 'Error al actualizar cultivo' });
   }
 }

@@ -1,6 +1,19 @@
 import pool, { getRequestDatabaseClient } from '../config/db.js';
 import { toDatabaseRegistroState } from '../utils/registroEstado.js';
 
+async function getCultivoStatusId(statusName) {
+  const result = await pool.query(
+    `SELECT idestadocultivo
+     FROM estado_cultivo
+     WHERE lower(btrim(nombre)) = lower(btrim($1))`,
+    [statusName]
+  );
+  if (result.rows.length !== 1) {
+    throw new Error(`Se esperaba exactamente un estado de cultivo "${statusName}".`);
+  }
+  return result.rows[0].idestadocultivo;
+}
+
 async function hasPublicColumn(tableName, columnName) {
   const result = await pool.query(
     `SELECT EXISTS (
@@ -117,10 +130,12 @@ export async function fetchAllFincas() {
 export async function fetchCultivosEnProceso() {
   try {
     const result = await pool.query(
-      `SELECT c.idcultivo AS id, c.nombre, c.idestadocultivo AS idestado, c.idfinca, f.nombre AS finca_nombre
+      `SELECT c.idcultivo AS id, c.nombre, c.idestadocultivo AS idestado, c.idfinca,
+              f.nombre AS finca_nombre, estado.nombre AS estado
        FROM cultivo c
+       JOIN estado_cultivo estado ON estado.idestadocultivo = c.idestadocultivo
        LEFT JOIN finca f ON c.idfinca = f.idfinca
-       WHERE c.idestadocultivo = 1
+       WHERE lower(btrim(estado.nombre)) = 'en proceso'
          AND c.estado_registro = 1
          AND f.estado_registro = 1
        ORDER BY f.nombre, c.nombre`
@@ -157,8 +172,10 @@ export async function fetchCultivosPorFinca(fincaId, estado = 'ACTIVO') {
          SELECT et.nombre_etapa AS nombre, ec.fecha_inicio
          FROM etapa_cultivo ec
          LEFT JOIN etapas et ON ec.idetapa = et.idetapa
+         JOIN estado_cultivo estado_etapa
+           ON estado_etapa.idestadocultivo = ec.idestadocultivo
          WHERE ec.idcultivo = c.idcultivo
-           AND ec.idestadocultivo = 1
+           AND lower(btrim(estado_etapa.nombre)) = 'en proceso'
            AND ec.estado_registro = 1
          ORDER BY ec.fecha_inicio DESC
          LIMIT 1
@@ -399,8 +416,11 @@ export async function validateEtapaAllowedForCultivo(idcultivo, idetapa) {
          SELECT 1
          FROM public.cultivo c
          JOIN public.etapas et ON et.idetapa = $2
+         JOIN public.estado_cultivo estadoCultivo
+           ON estadoCultivo.idestadocultivo = c.idestadocultivo
          WHERE c.idcultivo = $1
            AND c.estado_registro = 1
+           AND lower(btrim(estadoCultivo.nombre)) <> 'finalizado'
            AND COALESCE(to_jsonb(et) ->> 'estado_registro', '1') = '1'
        ) AS allowed`,
       [idcultivo, idetapa]
@@ -427,7 +447,11 @@ export async function validateEtapaAllowedForCultivo(idcultivo, idetapa) {
            AND COALESCE(to_jsonb(et) ->> 'estado_registro', '1') = '1'
        ) AS stage_is_active
      FROM public.cultivo c
-     WHERE c.idcultivo = $1 AND c.estado_registro = 1`,
+     JOIN public.estado_cultivo estadoCultivo
+       ON estadoCultivo.idestadocultivo = c.idestadocultivo
+     WHERE c.idcultivo = $1
+       AND c.estado_registro = 1
+       AND lower(btrim(estadoCultivo.nombre)) <> 'finalizado'`,
     [idcultivo, idetapa]
   )
   const crop = result.rows[0]
@@ -450,21 +474,20 @@ export async function validateEtapaAllowedForEtapaCultivo(etapaCultivoId, idetap
 
 export async function finalizeEtapaEnProceso(idcultivo) {
   try {
-    const estadoRes = await pool.query(
-      "SELECT idestadocultivo FROM estado_cultivo WHERE LOWER(nombre) LIKE 'finaliz%' LIMIT 1"
-    )
-    const finalizadoId = estadoRes.rows[0]?.idestadocultivo
-    if (!finalizadoId) throw new Error('No existe el estado de cultivo Finalizado')
+    const [finalizadoId, enProcesoId] = await Promise.all([
+      getCultivoStatusId('Finalizado'),
+      getCultivoStatusId('En Proceso'),
+    ]);
     const result = await pool.query(
       `UPDATE etapa_cultivo
        SET idestadocultivo = $2, fecha_final = CURRENT_DATE
-       WHERE idcultivo = $1 AND idestadocultivo = 1
+       WHERE idcultivo = $1 AND idestadocultivo = $3
        RETURNING idetapacultivo AS id, idetapa, descripcion,
                  fecha_inicio AS "fechaInicio", fecha_final AS "fechaFinal",
                  idestadocultivo AS idestado,
                  CASE WHEN estado_registro = 1 THEN 'ACTIVO' ELSE 'ANULADO' END AS estado_registro,
                  estado_registro = 1 AS activo`,
-      [idcultivo, finalizadoId]
+      [idcultivo, finalizadoId, enProcesoId]
     )
     return result.rows
   } catch (error) {
@@ -475,7 +498,7 @@ export async function finalizeEtapaEnProceso(idcultivo) {
 
 export async function createEtapaParaCultivo({ idcultivo, idetapa, descripcion }) {
   try {
-    const inProcessId = 1
+    const inProcessId = await getCultivoStatusId('En Proceso')
     const result = await pool.query(
       `INSERT INTO etapa_cultivo (idetapa, idcultivo, descripcion, fecha_inicio, idestadocultivo, estado_registro)
        VALUES ($1, $2, $3, CURRENT_DATE, $4, 1)
@@ -508,12 +531,10 @@ export async function updateEtapaParaCultivo(
     }
 
     const cultivoId = etapaResult.rows[0].idcultivo
-    const inProcessId = 1
-    const finalizadoRes = await pool.query(
-      "SELECT idestadocultivo FROM estado_cultivo WHERE LOWER(nombre) LIKE 'finaliz%' LIMIT 1"
-    )
-    const finalizadoId = finalizadoRes.rows[0]?.idestadocultivo
-    if (!finalizadoId) throw new Error('No existe el estado de cultivo Finalizado')
+    const [inProcessId, finalizadoId] = await Promise.all([
+      getCultivoStatusId('En Proceso'),
+      getCultivoStatusId('Finalizado'),
+    ]);
 
     if (forceFinalize && cultivoId && finalizadoId) {
       await pool.query(
@@ -678,11 +699,13 @@ export async function updateCultivo(idcultivo, { nombre, idtipocultivo, idestado
 
 export async function createCultivo({ nombre, idtipocultivo, idfinca }) {
   try {
+    const enProcesoId = await getCultivoStatusId('En Proceso');
     const result = await pool.query(
       `INSERT INTO cultivo (nombre, idtipocultivo, idfinca, idestadocultivo, fecha_inicio)
-       VALUES ($1, $2, $3, 1, CURRENT_DATE)
-       RETURNING idcultivo AS id, nombre, idfinca, idtipocultivo`,
-      [nombre, idtipocultivo, idfinca]
+       VALUES ($1, $2, $3, $4, CURRENT_DATE)
+       RETURNING idcultivo AS id, nombre, idfinca, idtipocultivo,
+                 idestadocultivo AS idestado`,
+      [nombre, idtipocultivo, idfinca, enProcesoId]
     );
     return result.rows[0];
   } catch (error) {
@@ -779,8 +802,16 @@ export async function fetchEtapaEnProcesoPorCultivo(idcultivo) {
     const result = await pool.query(
       `SELECT ec.idetapacultivo, et.nombre_etapa
        FROM etapa_cultivo ec
+       JOIN cultivo c ON c.idcultivo = ec.idcultivo
        LEFT JOIN etapas et ON ec.idetapa = et.idetapa
-       WHERE ec.idcultivo = $1 AND ec.idestadocultivo = 1 AND ec.estado_registro = 1
+       JOIN estado_cultivo estado ON estado.idestadocultivo = ec.idestadocultivo
+       JOIN estado_cultivo estadoCultivo
+         ON estadoCultivo.idestadocultivo = c.idestadocultivo
+       WHERE ec.idcultivo = $1
+         AND lower(btrim(estado.nombre)) = 'en proceso'
+         AND lower(btrim(estadoCultivo.nombre)) <> 'finalizado'
+         AND c.estado_registro = 1
+         AND ec.estado_registro = 1
        LIMIT 1`,
       [idcultivo]
     );
@@ -793,9 +824,11 @@ export async function fetchEtapaEnProcesoPorCultivo(idcultivo) {
 
 export async function validateCultivoCanAddCosto(idcultivo) {
   try {
-    // Verificar si el cultivo está en estado "En Proceso" (idestado = 1)
     const cultivoResult = await pool.query(
-      "SELECT idestadocultivo AS idestado FROM cultivo WHERE idcultivo = $1 AND estado_registro = 1",
+      `SELECT estado.nombre AS estado
+       FROM cultivo c
+       JOIN estado_cultivo estado ON estado.idestadocultivo = c.idestadocultivo
+       WHERE c.idcultivo = $1 AND c.estado_registro = 1`,
       [idcultivo]
     );
     if (!cultivoResult.rows.length) {
@@ -803,8 +836,7 @@ export async function validateCultivoCanAddCosto(idcultivo) {
     }
 
     const cultivo = cultivoResult.rows[0];
-    // Asumiendo que 1 es "En Proceso"
-    if (cultivo.idestado !== 1) {
+    if (cultivo.estado.trim().toLowerCase() !== 'en proceso') {
       return { valid: false, reason: 'cultivo_not_in_process' };
     }
 
@@ -819,7 +851,12 @@ export async function validateCultivoCanAddCosto(idcultivo) {
 
     // Verificar si hay etapa activa en proceso
     const etapaEnProcesoResult = await pool.query(
-      "SELECT COUNT(*) as count FROM etapa_cultivo WHERE idcultivo = $1 AND idestadocultivo = 1 AND estado_registro = 1",
+      `SELECT COUNT(*) as count
+       FROM etapa_cultivo ec
+       JOIN estado_cultivo estado ON estado.idestadocultivo = ec.idestadocultivo
+       WHERE ec.idcultivo = $1
+         AND lower(btrim(estado.nombre)) = 'en proceso'
+         AND ec.estado_registro = 1`,
       [idcultivo]
     );
 
@@ -839,9 +876,15 @@ export async function validateCultivoCanAddCosecha(idcultivo) {
     const result = await pool.query(
       `SELECT ec.idetapacultivo
        FROM etapa_cultivo ec
+       JOIN cultivo c ON c.idcultivo = ec.idcultivo
        LEFT JOIN etapas et ON ec.idetapa = et.idetapa
+       JOIN estado_cultivo estado ON estado.idestadocultivo = ec.idestadocultivo
+       JOIN estado_cultivo estadoCultivo
+         ON estadoCultivo.idestadocultivo = c.idestadocultivo
        WHERE ec.idcultivo = $1
-         AND ec.idestadocultivo = 1
+         AND lower(btrim(estado.nombre)) = 'en proceso'
+         AND lower(btrim(estadoCultivo.nombre)) <> 'finalizado'
+         AND c.estado_registro = 1
          AND ec.estado_registro = 1
          AND LOWER(et.nombre_etapa) = LOWER('Cosecha')
        LIMIT 1`,
@@ -1024,11 +1067,15 @@ export async function validateActiveEtapaForCultivo(idetapacultivo, idcultivo) {
        FROM etapa_cultivo ec
        JOIN cultivo c ON c.idcultivo = ec.idcultivo
        JOIN etapas et ON et.idetapa = ec.idetapa
+       JOIN estado_cultivo estado ON estado.idestadocultivo = ec.idestadocultivo
+       JOIN estado_cultivo estadoCultivo
+         ON estadoCultivo.idestadocultivo = c.idestadocultivo
        WHERE ec.idetapacultivo = $1
          AND ec.idcultivo = $2
-         AND ec.idestadocultivo = 1
+         AND lower(btrim(estado.nombre)) = 'en proceso'
          AND ec.estado_registro = 1
          AND c.estado_registro = 1
+         AND lower(btrim(estadoCultivo.nombre)) <> 'finalizado'
          ${typeStageCondition}
        LIMIT 1`,
       [idetapacultivo, idcultivo]

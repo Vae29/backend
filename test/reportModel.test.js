@@ -66,6 +66,13 @@ test('combined crop, user, status, cost, subcategory, and date filters are param
   assert.match(query, /cc\.fecha_cosecha >= \$9::date/);
 });
 
+test('status name report filter ignores casing and surrounding spaces', () => {
+  const { query, params } = buildReportQuery('rentabilidad', { estado: ' En Proceso ' });
+
+  assert.deepEqual(params, [' En Proceso ']);
+  assert.match(query, /LOWER\(BTRIM\(e\.nombre\)\) = LOWER\(BTRIM\(\$1\)\)/);
+});
+
 test('summary reports aggregate costs and harvests before joining them', () => {
   const { query } = buildReportQuery('por-cultivo');
 

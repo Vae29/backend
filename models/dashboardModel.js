@@ -94,7 +94,7 @@ export async function findDashboardByFinca(fincaId, filters = {}) {
              c.nombre,
              c.fecha_inicio,
              c.fecha_final,
-             COALESCE(LOWER(e.nombre), '') AS estado
+             COALESCE(LOWER(BTRIM(e.nombre)), '') AS estado
       FROM cultivo c
       LEFT JOIN estado_cultivo e ON c.idestadocultivo = e.idestadocultivo
       WHERE c.idfinca = $1
@@ -156,7 +156,7 @@ export async function findDashboardByFinca(fincaId, filters = {}) {
              c.nombre,
              c.fecha_inicio,
              c.fecha_final,
-             COALESCE(LOWER(e.nombre), '') AS estado,
+             COALESCE(LOWER(BTRIM(e.nombre)), '') AS estado,
              CASE WHEN c.estado_registro = 1 THEN 'ACTIVO' ELSE 'ARCHIVADO' END AS estado_registro
       FROM cultivo c
       LEFT JOIN estado_cultivo e ON c.idestadocultivo = e.idestadocultivo
@@ -292,13 +292,13 @@ export async function findDashboardByFinca(fincaId, filters = {}) {
   const upcomingCropQuery = `
     SELECT c.nombre,
            TO_CHAR(c.fecha_final, 'DD/MM/YYYY') AS fecha_final,
-           COALESCE(LOWER(e.nombre), '') AS estado
+           COALESCE(LOWER(BTRIM(e.nombre)), '') AS estado
     FROM cultivo c
     LEFT JOIN estado_cultivo e ON c.idestadocultivo = e.idestadocultivo
     WHERE c.idfinca = $1
       AND c.estado_registro = 1
       AND c.fecha_final BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days'
-      AND COALESCE(LOWER(e.nombre), '') <> 'finalizado'
+      AND COALESCE(LOWER(BTRIM(e.nombre)), '') <> 'finalizado'
     ORDER BY c.fecha_final
     LIMIT 1;
   `;

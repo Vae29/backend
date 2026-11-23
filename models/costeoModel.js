@@ -339,6 +339,7 @@ export async function getAvailableKardexOutputs(fincaId, cultivoId) {
      JOIN inventario.producto p ON p.id_producto = k.id_producto
      JOIN inventario.presentacion_producto pp ON pp.id_producto = p.id_producto
      JOIN cultivo c ON c.idcultivo = kd.idcultivo
+     JOIN estado_cultivo estado ON estado.idestadocultivo = c.idestadocultivo
      LEFT JOIN LATERAL (
        SELECT sum(d.cantidad_utilizada) AS cantidad_asociada
        FROM public.costo_insumo_detalle d
@@ -347,7 +348,7 @@ export async function getAvailableKardexOutputs(fincaId, cultivoId) {
      WHERE k.tipo = 'SALIDA'
        AND k.id_finca = $1
        AND c.idfinca = $1
-       AND c.idestadocultivo = 1
+       AND lower(btrim(estado.nombre)) = 'en proceso'
        AND c.estado_registro = 1
        AND kd.idcultivo = $2
        AND (k.cantidad * pp.contenido_por_envase)
@@ -356,6 +357,24 @@ export async function getAvailableKardexOutputs(fincaId, cultivoId) {
     [fincaId, cultivoId]
   );
   return result.rows;
+}
+
+export async function userHasAssignedCultivo(userId, fincaId, cultivoId) {
+  const result = await pool.query(
+    `SELECT EXISTS (
+       SELECT 1
+       FROM public.usuario u
+       JOIN public.usuario_cultivo uc ON uc.id_usuario = u.id_usuario
+       JOIN public.cultivo c ON c.idcultivo = uc.idcultivo
+       WHERE u.id_usuario = $1
+         AND u.estado_registro = 1
+         AND uc.idcultivo = $3
+         AND c.idfinca = $2
+         AND c.estado_registro = 1
+     ) AS allowed`,
+    [userId, fincaId, cultivoId]
+  );
+  return Boolean(result.rows[0]?.allowed);
 }
 
 export async function registerInventoryConsumption({
@@ -444,8 +463,14 @@ export async function registerLaborPayment({
        FROM etapa_cultivo ec
        JOIN cultivo crop ON crop.idcultivo = ec.idcultivo
        JOIN etapas et ON et.idetapa = ec.idetapa
+       JOIN estado_cultivo estado_cultivo
+         ON estado_cultivo.idestadocultivo = crop.idestadocultivo
+       JOIN estado_cultivo estado_etapa
+         ON estado_etapa.idestadocultivo = ec.idestadocultivo
        WHERE ec.idetapacultivo = $5 AND ec.idcultivo = $4
-         AND ec.estado_registro = 1 AND ec.idestadocultivo = 1
+         AND ec.estado_registro = 1
+         AND lower(btrim(estado_cultivo.nombre)) = 'en proceso'
+         AND lower(btrim(estado_etapa.nombre)) = 'en proceso'
          AND crop.idfinca = $8 AND crop.estado_registro = 1
          ${typeStageCondition}
      )

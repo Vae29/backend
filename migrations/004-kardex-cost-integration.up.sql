@@ -44,7 +44,7 @@ DECLARE
   v_idfinca INTEGER;
   v_tipo TEXT;
   v_finca_cultivo INTEGER;
-  v_estado_cultivo INTEGER;
+  v_estado_cultivo TEXT;
   v_estado_registro SMALLINT;
 BEGIN
   SELECT k.id_finca, k.tipo
@@ -59,15 +59,17 @@ BEGIN
       USING ERRCODE = '23514';
   END IF;
 
-  SELECT c.idfinca, c.idestadocultivo, c.estado_registro
+  SELECT c.idfinca, estado.nombre, c.estado_registro
     INTO v_finca_cultivo, v_estado_cultivo, v_estado_registro
     FROM public.cultivo c
+    JOIN public.estado_cultivo estado
+      ON estado.idestadocultivo = c.idestadocultivo
    WHERE c.idcultivo = NEW.idcultivo
    FOR KEY SHARE;
 
   IF NOT FOUND
      OR v_finca_cultivo <> v_idfinca
-     OR v_estado_cultivo <> 1
+     OR lower(btrim(v_estado_cultivo)) <> 'en proceso'
      OR v_estado_registro <> 1 THEN
     RAISE EXCEPTION
       'El cultivo de destino debe estar activo, En proceso y pertenecer a la finca de la salida.'
@@ -478,11 +480,15 @@ BEGIN
     INTO v_idetapa_cultivo, v_idtipocultivo
     FROM public.cultivo c
     JOIN public.etapa_cultivo ec ON ec.idcultivo = c.idcultivo
+    JOIN public.estado_cultivo estado_cultivo
+      ON estado_cultivo.idestadocultivo = c.idestadocultivo
+    JOIN public.estado_cultivo estado_etapa
+      ON estado_etapa.idestadocultivo = ec.idestadocultivo
    WHERE c.idcultivo = p_idcultivo
      AND c.idfinca = p_idfinca
-     AND c.idestadocultivo = 1
+     AND lower(btrim(estado_cultivo.nombre)) = 'en proceso'
      AND c.estado_registro = 1
-     AND ec.idestadocultivo = 1
+     AND lower(btrim(estado_etapa.nombre)) = 'en proceso'
      AND ec.estado_registro = 1
    ORDER BY ec.fecha_inicio DESC, ec.idetapacultivo DESC
    LIMIT 1
