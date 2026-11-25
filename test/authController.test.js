@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import bcrypt from 'bcryptjs';
 import pool from '../config/db.js';
-import { createUserController, getAllUsers } from '../controllers/authController.js';
+import { createUserController, getAllUsers, updateUserController } from '../controllers/authController.js';
 
 function createResponse() {
   return {
@@ -19,7 +19,7 @@ function createResponse() {
   };
 }
 
-test('new user credentials are generated securely and never exposed to the admin client', async (t) => {
+test('new user password is hashed and never returned to the admin client', async (t) => {
   let insertValues;
   let moduleValues;
   t.mock.method(pool, 'query', async (sql, values) => {
@@ -50,7 +50,7 @@ test('new user credentials are generated securely and never exposed to the admin
       nombre: 'Nueva',
       apellidos: 'Cuenta',
       correo: 'NUEVA@example.com',
-      contraseña: 'el-admin-no-debe-elegir-esta-clave',
+      contraseña: 'clave-inicial-segura',
       rol: 'trabajador',
       fincas: [],
       cultivos: [],
@@ -59,11 +59,36 @@ test('new user credentials are generated securely and never exposed to the admin
 
   assert.equal(response.statusCode, 201);
   assert.match(insertValues[3], /^\$2[aby]\$12\$/);
-  assert.equal(await bcrypt.compare('el-admin-no-debe-elegir-esta-clave', insertValues[3]), false);
+  assert.equal(await bcrypt.compare('clave-inicial-segura', insertValues[3]), true);
   assert.equal(Object.hasOwn(response.body.data, 'password'), false);
   assert.equal(Object.hasOwn(response.body.data, 'contraseña'), false);
   assert.deepEqual(moduleValues[1], ['costos']);
   assert.deepEqual(response.body.data.modulos, ['costos']);
+});
+
+test('user creation returns a clear conflict when the email is already registered', async (t) => {
+  t.mock.method(pool, 'query', async () => {
+    const error = new Error('duplicate key');
+    error.code = '23505';
+    error.constraint = 'uq_usuario_correo';
+    throw error;
+  });
+  t.mock.method(console, 'error', () => {});
+
+  const response = createResponse();
+  await createUserController({
+    body: {
+      nombre: 'Nueva',
+      apellidos: 'Cuenta',
+      correo: 'repetido@example.com',
+      contraseña: 'clave-inicial-segura',
+      rol: 'trabajador',
+      modulos: ['costos'],
+    },
+  }, response);
+
+  assert.equal(response.statusCode, 409);
+  assert.match(response.body.message, /correo diferente/);
 });
 
 test('user creation rejects an empty module selection', async (t) => {
@@ -77,6 +102,7 @@ test('user creation rejects an empty module selection', async (t) => {
       nombre: 'Nueva',
       apellidos: 'Cuenta',
       correo: 'nueva@example.com',
+      contraseña: 'clave-inicial-segura',
       rol: 'trabajador',
       modulos: [],
     },
@@ -115,6 +141,7 @@ test('user creation accepts an inventory-only module assignment', async (t) => {
       nombre: 'Bodega',
       apellidos: 'Usuario',
       correo: 'bodega@example.com',
+      contraseña: 'clave-inicial-segura',
       rol: 'trabajador',
       modulos: ['inventario'],
     },
@@ -123,6 +150,41 @@ test('user creation accepts an inventory-only module assignment', async (t) => {
   assert.equal(response.statusCode, 201);
   assert.deepEqual(assignedModules, ['inventario']);
   assert.deepEqual(response.body.data.modulos, ['inventario']);
+});
+
+test('user creation explains when the selected module is missing from the catalog', async (t) => {
+  t.mock.method(pool, 'query', async (sql) => {
+    if (/INSERT INTO usuario_modulos/.test(sql)) return { rows: [] };
+    if (/INSERT INTO usuario \(/.test(sql)) {
+      return {
+        rows: [{
+          id: 9,
+          email: 'bodega@example.com',
+          primer_nombre: 'Bodega',
+          primer_apellido: 'Usuario',
+          rol: 2,
+          estado_registro: 'ACTIVO',
+        }],
+      };
+    }
+    return { rows: [] };
+  });
+  t.mock.method(console, 'error', () => {});
+
+  const response = createResponse();
+  await createUserController({
+    body: {
+      nombre: 'Bodega',
+      apellidos: 'Usuario',
+      correo: 'bodega@example.com',
+      contraseña: 'clave-inicial-segura',
+      rol: 'trabajador',
+      modulos: ['inventario'],
+    },
+  }, response);
+
+  assert.equal(response.statusCode, 503);
+  assert.match(response.body.message, /007-seed-user-access-modules\.up\.sql/);
 });
 
 test('admin user listing omits password hashes even if a model row contains one', async (t) => {
@@ -149,4 +211,107 @@ test('admin user listing omits password hashes even if a model row contains one'
   assert.equal(Object.hasOwn(response.body.data[0], 'password'), false);
   assert.equal(Object.hasOwn(response.body.data[0], 'contraseña'), false);
   assert.deepEqual(response.body.data[0].modulos, ['inventario']);
+});
+
+test('admin can update a user module assignment', async (t) => {
+  const moduleInsert = [];
+  t.mock.method(pool, 'query', async (sql, values) => {
+    if (/INSERT INTO usuario_modulos/.test(sql)) {
+      moduleInsert.push(values);
+      return { rows: [{ id_modulo: 2 }] };
+    }
+    if (/UPDATE usuario/.test(sql)) {
+      return {
+        rows: [{
+          id: 8,
+          email: 'usuario@example.com',
+          primer_nombre: 'Usuario',
+          primer_apellido: 'Editado',
+          rol: 2,
+          estado_registro: 'ACTIVO',
+        }],
+      };
+    }
+    if (/SELECT COALESCE\(array_agg\(m\.nombre/.test(sql)) {
+      return { rows: [{ modulos: ['inventario'] }] };
+    }
+    return { rows: [] };
+  });
+  t.mock.method(console, 'error', () => {});
+
+  const response = createResponse();
+  await updateUserController({
+    params: { id: '8' },
+    body: {
+      nombre: 'Usuario',
+      apellidos: 'Editado',
+      correo: 'usuario@example.com',
+      rol: 'trabajador',
+      modulos: ['inventario'],
+    },
+  }, response);
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(moduleInsert[0], ['8', ['inventario']]);
+  assert.deepEqual(response.body.data.modulos, ['inventario']);
+});
+
+test('user update returns a clear conflict when the email belongs to another user', async (t) => {
+  t.mock.method(pool, 'query', async () => {
+    const error = new Error('duplicate key');
+    error.code = '23505';
+    error.constraint = 'uq_usuario_correo';
+    throw error;
+  });
+  t.mock.method(console, 'error', () => {});
+
+  const response = createResponse();
+  await updateUserController({
+    params: { id: '8' },
+    body: {
+      nombre: 'Usuario',
+      apellidos: 'Editado',
+      correo: 'repetido@example.com',
+      rol: 'trabajador',
+      modulos: ['costos', 'inventario'],
+    },
+  }, response);
+
+  assert.equal(response.statusCode, 409);
+  assert.match(response.body.message, /correo ya está asignado/);
+});
+
+test('user update explains when a selected module is missing from the catalog', async (t) => {
+  t.mock.method(pool, 'query', async (sql) => {
+    if (/INSERT INTO usuario_modulos/.test(sql)) return { rows: [] };
+    if (/UPDATE usuario/.test(sql)) {
+      return {
+        rows: [{
+          id: 8,
+          email: 'usuario@example.com',
+          primer_nombre: 'Usuario',
+          primer_apellido: 'Editado',
+          rol: 2,
+          estado_registro: 'ACTIVO',
+        }],
+      };
+    }
+    return { rows: [] };
+  });
+  t.mock.method(console, 'error', () => {});
+
+  const response = createResponse();
+  await updateUserController({
+    params: { id: '8' },
+    body: {
+      nombre: 'Usuario',
+      apellidos: 'Editado',
+      correo: 'usuario@example.com',
+      rol: 'trabajador',
+      modulos: ['inventario'],
+    },
+  }, response);
+
+  assert.equal(response.statusCode, 503);
+  assert.match(response.body.message, /007-seed-user-access-modules\.up\.sql/);
 });

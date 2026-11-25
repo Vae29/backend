@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import bcrypt from 'bcryptjs';
 import pool from '../config/db.js';
-import { createUser, fetchAllUsers, findUserByCredentials } from '../models/authModel.js';
+import { createUser, fetchAllUsers, findUserByCredentials, updateUser } from '../models/authModel.js';
 
 test('login lookup only returns users assigned to the costos module', async () => {
   const originalQuery = pool.query;
@@ -119,4 +119,38 @@ test('createUser persists the selected module memberships', async (t) => {
   const moduleInsert = queries.find(({ query }) => /INSERT INTO usuario_modulos/.test(query));
   assert.deepEqual(moduleInsert.params, [8, ['costos', 'inventario']]);
   assert.deepEqual(user.modulos, ['costos', 'inventario']);
+});
+
+test('updateUser replaces module memberships and returns the saved modules', async (t) => {
+  const queries = [];
+  t.mock.method(pool, 'query', async (query, params) => {
+    queries.push({ query, params });
+    if (/UPDATE usuario/.test(query)) {
+      return { rows: [{ id: 8, email: 'editado@example.com', rol: 2 }] };
+    }
+    if (/INSERT INTO usuario_modulos/.test(query)) {
+      return { rows: [{ id_modulo: 1 }] };
+    }
+    if (/SELECT COALESCE\(array_agg\(m\.nombre/.test(query)) {
+      return { rows: [{ modulos: ['costos'] }] };
+    }
+    return { rows: [] };
+  });
+
+  const user = await updateUser(8, {
+    nombre: 'Editado',
+    apellidos: 'Usuario',
+    correo: 'editado@example.com',
+    rol: 'trabajador',
+    fincas: [],
+    cultivos: [],
+    modulos: ['costos'],
+  });
+
+  assert.deepEqual(user.modulos, ['costos']);
+  const deleteModules = queries.find(({ query }) => /DELETE FROM usuario_modulos/.test(query));
+  const insertModules = queries.find(({ query }) => /INSERT INTO usuario_modulos/.test(query));
+  assert.match(deleteModules.query, /m\.nombre IN \('costos', 'inventario'\)/);
+  assert.deepEqual(deleteModules.params, [8]);
+  assert.deepEqual(insertModules.params, [8, ['costos']]);
 });

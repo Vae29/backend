@@ -158,7 +158,9 @@ export async function createUser({
     [userId, modulos]
   )
   if (moduleAssignments.rows.length !== modulos.length) {
-    throw new Error('No se pudieron asignar todos los módulos solicitados al usuario.')
+    const error = new Error('El catálogo public.modulos no contiene todos los módulos solicitados.')
+    error.code = 'MODULE_CATALOG_INCOMPLETE'
+    throw error
   }
   
   // Asignar fincas si existen
@@ -180,7 +182,7 @@ export async function createUser({
   return { ...result.rows[0], modulos }
 }
 
-export async function updateUser(id, { nombre, apellidos, correo, rol, fincas = [], cultivos = [] }) {
+export async function updateUser(id, { nombre, apellidos, correo, rol, fincas = [], cultivos = [], modulos }) {
   const roleId = rol === 'administrador' ? 1 : 2
   const result = await pool.query(
     `UPDATE usuario
@@ -221,8 +223,41 @@ export async function updateUser(id, { nombre, apellidos, correo, rol, fincas = 
       await pool.query(cultivosQuery, cultivosParams);
     }
   }
-  
-  return result.rows[0]
+
+  if (modulos !== undefined) {
+    await pool.query(
+      `DELETE FROM usuario_modulos um
+       USING modulos m
+       WHERE um.id_usuario = $1
+         AND um.id_modulo = m.id_modulo
+         AND m.nombre IN ('costos', 'inventario')`,
+      [id]
+    )
+    const moduleAssignments = await pool.query(
+      `INSERT INTO usuario_modulos (id_usuario, id_modulo)
+       SELECT $1, m.id_modulo
+       FROM modulos m
+       WHERE m.nombre = ANY($2::text[])
+       RETURNING id_modulo`,
+      [id, modulos]
+    )
+    if (moduleAssignments.rows.length !== modulos.length) {
+      const error = new Error('El catálogo public.modulos no contiene todos los módulos solicitados.')
+      error.code = 'MODULE_CATALOG_INCOMPLETE'
+      throw error
+    }
+  }
+
+  const moduleResult = await pool.query(
+    `SELECT COALESCE(array_agg(m.nombre ORDER BY m.nombre), ARRAY[]::varchar[]) AS modulos
+     FROM usuario_modulos um
+     JOIN modulos m ON m.id_modulo = um.id_modulo
+     WHERE um.id_usuario = $1
+       AND m.nombre IN ('costos', 'inventario')`,
+    [id]
+  )
+
+  return { ...result.rows[0], modulos: moduleResult.rows[0].modulos }
 }
 
 export async function changeUserState(id, nuevoEstado) {

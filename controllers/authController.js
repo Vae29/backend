@@ -1,6 +1,6 @@
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { randomBytes, randomInt } from 'crypto';
+import { randomInt } from 'crypto';
 import { sendResetCodeEmail } from '../utils/emailSender.js';
 import {
   findUserByCredentials,
@@ -21,6 +21,8 @@ import { crearSesion, verificarSesion, cerrarSesion, obtenerSesionesActivas } fr
 import { JWT_CONFIG } from '../config/jwt.js';
 
 const generateResetCode = () => String(randomInt(100000, 1000000));
+const isDuplicateUserEmail = (error) =>
+  error?.code === '23505' && error?.constraint === 'uq_usuario_correo';
 
 // Generar Access Token (15 minutos)
 function generarAccessToken(usuario) {
@@ -277,12 +279,12 @@ export async function recoverPassword(req, res) {
 
 export async function createUserController(req, res) {
   try {
-    const { nombre, apellidos, correo, rol, fincas = [], cultivos = [], modulos } = req.body
+    const { nombre, apellidos, correo, contraseña, rol, fincas = [], cultivos = [], modulos } = req.body
 
-    if (!nombre || !apellidos || !correo || !rol) {
+    if (!nombre || !apellidos || !correo || !rol || typeof contraseña !== 'string' || contraseña.length < 8) {
       return res.status(400).json({
         success: false,
-        message: 'Todos los campos son requeridos.',
+        message: 'Todos los campos son requeridos y la contraseña inicial debe tener al menos 8 caracteres.',
       })
     }
 
@@ -320,7 +322,7 @@ export async function createUserController(req, res) {
       nombre: cleanNombre,
       apellidos: cleanApellidos,
       correo: cleanCorreo,
-      contraseña: await bcrypt.hash(randomBytes(32).toString('hex'), 12),
+      contraseña: await bcrypt.hash(contraseña, 12),
       rol,
       fincas,
       cultivos,
@@ -340,11 +342,23 @@ export async function createUserController(req, res) {
 
     res.status(201).json({
       success: true,
-      message: 'Usuario creado exitosamente',
+      message: 'Usuario creado con la contraseña inicial configurada. Comparte la contraseña por un medio seguro; el usuario podrá cambiarla desde “Olvidé mi contraseña”.',
       data: userResponse,
     })
   } catch (error) {
     console.error('Error en createUserController:', error)
+    if (error?.code === 'MODULE_CATALOG_INCOMPLETE') {
+      return res.status(503).json({
+        success: false,
+        message: 'No está configurado el catálogo de módulos. Aplica la migración 007-seed-user-access-modules.up.sql y vuelve a intentar.',
+      })
+    }
+    if (isDuplicateUserEmail(error)) {
+      return res.status(409).json({
+        success: false,
+        message: 'Ya existe un usuario registrado con ese correo. Usa un correo diferente.',
+      })
+    }
     res.status(500).json({
       success: false,
       message: 'Error al crear el usuario',
@@ -355,12 +369,25 @@ export async function createUserController(req, res) {
 export async function updateUserController(req, res) {
   try {
     const { id } = req.params
-    const { nombre, apellidos, correo, rol, fincas = [], cultivos = [] } = req.body
+    const { nombre, apellidos, correo, rol, fincas = [], cultivos = [], modulos } = req.body
 
     if (!nombre || !apellidos || !correo || !rol) {
       return res.status(400).json({
         success: false,
         message: 'Todos los campos son requeridos',
+      })
+    }
+
+    const modulosPermitidos = new Set(['costos', 'inventario'])
+    if (
+      modulos !== undefined &&
+      (!Array.isArray(modulos) ||
+        modulos.length === 0 ||
+        modulos.some((modulo) => !modulosPermitidos.has(modulo)))
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'Selecciona al menos un módulo válido: Costos o Inventario.',
       })
     }
 
@@ -387,6 +414,7 @@ export async function updateUserController(req, res) {
       rol,
       fincas,
       cultivos,
+      ...(modulos === undefined ? {} : { modulos: [...new Set(modulos)] }),
     })
 
     if (!updatedUser) {
@@ -404,6 +432,7 @@ export async function updateUserController(req, res) {
       rol: Number(updatedUser.rol) === 1 ? 'Administrador' : 'Trabajador',
       fincas,
       cultivos,
+      modulos: updatedUser.modulos,
     }
 
     res.json({
@@ -413,6 +442,18 @@ export async function updateUserController(req, res) {
     })
   } catch (error) {
     console.error('Error en updateUserController:', error)
+    if (error?.code === 'MODULE_CATALOG_INCOMPLETE') {
+      return res.status(503).json({
+        success: false,
+        message: 'No está configurado el catálogo de módulos. Aplica la migración 007-seed-user-access-modules.up.sql y vuelve a intentar.',
+      })
+    }
+    if (isDuplicateUserEmail(error)) {
+      return res.status(409).json({
+        success: false,
+        message: 'Ese correo ya está asignado a otro usuario. Usa un correo diferente.',
+      })
+    }
     res.status(500).json({
       success: false,
       message: 'Error al actualizar el usuario',
