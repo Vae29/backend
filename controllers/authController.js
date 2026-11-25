@@ -125,6 +125,7 @@ export async function login(req, res) {
 }
 
 export async function requestPasswordReset(req, res) {
+  let resetTokenId = null
   try {
     const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : ''
 
@@ -146,14 +147,29 @@ export async function requestPasswordReset(req, res) {
     const code = generateResetCode()
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000)
 
-    await createPasswordResetToken(usuario.id, code, expiresAt)
-    await sendResetCodeEmail(usuario.email, code)
+    const resetToken = await createPasswordResetToken(usuario.id, code, expiresAt)
+    resetTokenId = resetToken.id
+    const emailSent = await sendResetCodeEmail(usuario.email, code)
+    if (!emailSent) {
+      await invalidatePasswordResetToken(resetTokenId)
+      return res.status(503).json({
+        success: false,
+        message: 'No se pudo enviar el código de recuperación. Revisa la configuración del correo e inténtalo de nuevo.',
+      })
+    }
 
-    res.json({
+    return res.json({
       success: true,
       message: 'Si el correo está registrado, recibirás un código de recuperación.',
     })
   } catch (error) {
+    if (resetTokenId) {
+      try {
+        await invalidatePasswordResetToken(resetTokenId)
+      } catch (cleanupError) {
+        console.error('Error invalidando código de recuperación no enviado:', cleanupError)
+      }
+    }
     console.error('Error en requestPasswordReset:', error.stack || error)
     res.status(500).json({
       success: false,
@@ -191,7 +207,10 @@ export async function requestUserPasswordReset(req, res) {
       userName: usuario.nombre,
       reason: motivo || 'El administrador solicitó el envío de un código de recuperación.',
     });
-    await sendResetCodeEmail(usuario.email, code);
+    const emailSent = await sendResetCodeEmail(usuario.email, code);
+    if (!emailSent) {
+      throw new Error('No se pudo enviar el código de recuperación.');
+    }
 
     return res.json({
       success: true,

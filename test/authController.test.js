@@ -1,8 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import bcrypt from 'bcryptjs';
+import nodemailer from 'nodemailer';
 import pool from '../config/db.js';
-import { createUserController, getAllUsers, updateUserController } from '../controllers/authController.js';
+import {
+  createUserController,
+  getAllUsers,
+  requestPasswordReset,
+  updateUserController,
+} from '../controllers/authController.js';
 
 function createResponse() {
   return {
@@ -18,6 +24,67 @@ function createResponse() {
     },
   };
 }
+
+test('password reset invalidates its code when email delivery fails', async (t) => {
+  const smtpNames = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM'];
+  const previousSmtp = Object.fromEntries(smtpNames.map((name) => [name, process.env[name]]));
+  Object.assign(process.env, {
+    SMTP_HOST: 'smtp.example.com',
+    SMTP_PORT: '465',
+    SMTP_USER: 'admin@example.com',
+    SMTP_PASS: 'application-password',
+    SMTP_FROM: 'admin@example.com',
+  });
+  t.after(() => {
+    for (const name of smtpNames) {
+      if (previousSmtp[name] === undefined) delete process.env[name];
+      else process.env[name] = previousSmtp[name];
+    }
+  });
+
+  let tokenInvalidated = false;
+  t.mock.method(pool, 'query', async (sql) => {
+    if (/FROM usuario WHERE correo/.test(sql)) {
+      return { rows: [{ id: 8, email: 'user@example.com' }] };
+    }
+    if (/FROM public\.configuracion_correo/.test(sql)) {
+      const error = new Error('config table missing');
+      error.code = '42P01';
+      throw error;
+    }
+    if (/UPDATE public\.configuracion_correo/.test(sql)) {
+      const error = new Error('config table missing');
+      error.code = '42P01';
+      throw error;
+    }
+    return { rows: [] };
+  });
+  t.mock.method(pool, 'connect', async () => ({
+    async query(sql) {
+      if (/INSERT INTO password_reset_tokens/.test(sql)) {
+        return { rows: [{ id: 42 }] };
+      }
+      if (/UPDATE password_reset_tokens SET used = true WHERE id =/.test(sql)) {
+        tokenInvalidated = true;
+      }
+      return { rows: [] };
+    },
+    release() {},
+  }));
+  t.mock.method(nodemailer, 'createTransport', () => ({
+    async sendMail() {
+      throw new Error('simulated SMTP outage');
+    },
+  }));
+  t.mock.method(console, 'error', () => {});
+
+  const response = createResponse();
+  await requestPasswordReset({ body: { email: 'user@example.com' } }, response);
+
+  assert.equal(response.statusCode, 503);
+  assert.equal(response.body.success, false);
+  assert.equal(tokenInvalidated, true);
+});
 
 test('new user password is hashed and never returned to the admin client', async (t) => {
   let insertValues;

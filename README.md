@@ -21,6 +21,8 @@ en **Configuración avanzada**.
 
 ## Migración requerida
 
+El flujo de recuperación requiere `migrations/001-password-reset-token-security.sql` para limitar intentos y guardar los códigos de forma segura. Para auditar las solicitudes de restablecimiento hechas por un administrador, aplica también `migrations/006-auditoria-restablecimiento-password.up.sql` después del esquema base de auditoría.
+
 La pantalla necesita la tabla `public.configuracion_correo`. La migración
 propuesta es `migrations/004-configuracion-correo.up.sql`; su archivo de reversa
 es `migrations/004-configuracion-correo.down.sql`. Ninguna de las dos se ejecuta
