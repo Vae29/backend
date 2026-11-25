@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { randomInt } from 'crypto';
 import { sendResetCodeEmail } from '../utils/emailSender.js';
+import { isPasswordResetEmailAvailable } from '../utils/emailConfigService.js';
 import {
   findUserByCredentials,
   findUserByEmail,
@@ -23,6 +24,16 @@ import { JWT_CONFIG } from '../config/jwt.js';
 const generateResetCode = () => String(randomInt(100000, 1000000));
 const isDuplicateUserEmail = (error) =>
   error?.code === '23505' && error?.constraint === 'uq_usuario_correo';
+
+export async function getPasswordResetAvailability(req, res) {
+  try {
+    const available = await isPasswordResetEmailAvailable();
+    return res.json(available);
+  } catch {
+    console.error('[Correo] No se pudo consultar la disponibilidad de recuperación.');
+    return res.json(false);
+  }
+}
 
 // Generar Access Token (15 minutos)
 function generarAccessToken(usuario) {

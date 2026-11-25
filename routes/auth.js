@@ -1,7 +1,8 @@
 import express from 'express';
-import { login, getAllUsers, createUserController, updateUserController, deleteUserController, changeUserStateController, requestPasswordReset, requestUserPasswordReset, verifyResetCode, recoverPassword, refreshToken, logout, obtenerMisSesiones } from '../controllers/authController.js';
+import { login, getAllUsers, createUserController, updateUserController, deleteUserController, changeUserStateController, requestPasswordReset, requestUserPasswordReset, verifyResetCode, recoverPassword, refreshToken, logout, obtenerMisSesiones, getPasswordResetAvailability } from '../controllers/authController.js';
 import { verificarAccessToken, verificarAdmin } from '../middleware/auth.js';
 import { auditContext } from '../middleware/auditContext.js';
+import { rateLimit } from '../middleware/rateLimit.js';
 
 const router = express.Router();
 
@@ -9,6 +10,15 @@ router.post('/login', login);
 router.post('/refresh', refreshToken);
 router.post('/logout', logout);
 router.get('/sesiones', verificarAccessToken, obtenerMisSesiones);
+router.get(
+  '/password-reset-availability',
+  rateLimit({
+    windowMs: 15 * 60_000,
+    max: 60,
+    message: 'Demasiadas consultas. Inténtalo de nuevo más tarde.',
+  }),
+  getPasswordResetAvailability,
+);
 router.post('/request-reset', requestPasswordReset);
 router.post('/verify-reset-code', verifyResetCode);
 router.post('/recover-password', recoverPassword);

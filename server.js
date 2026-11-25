@@ -12,6 +12,8 @@ import reportesRoutes from './routes/reportes.js';
 import auditoriaRoutes from './routes/auditoria.js';
 import costeoRoutes from './routes/costeo.js';
 import fincasRoutes from './routes/fincas.js';
+import emailConfigRoutes from './routes/emailConfig.js';
+import { initializeEmailEncryptionKey } from './utils/emailConfigService.js';
 
 const app = express();
 
@@ -57,6 +59,7 @@ app.get('/test', (req, res) => {
 ========================= */
 
 app.use('/auth', authRoutes);
+app.use('/admin', emailConfigRoutes);
 app.use('/api/fincas', fincasRoutes);
 app.use('/api', asignacionesUsuarioRoutes);
 app.use('/api/dashboard', dashboardRoutes);
@@ -70,6 +73,9 @@ app.use('/api/costeo', costeoRoutes);
 ========================= */
 
 testConnection();
+initializeEmailEncryptionKey().catch(() => {
+  console.error('[Correo] No se pudo preparar la clave de cifrado; revisa su ruta y permisos.');
+});
 
 /* =========================
    ERRORES GLOBALES
